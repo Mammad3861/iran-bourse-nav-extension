@@ -4,6 +4,8 @@ import { formatPersianTimestamp } from '../core/persian-date-utils';
 import { getActiveSymbol, getManualOverride } from '../data/cache-store';
 import {
   discoverLatestCodalReports,
+  getReportDetail,
+  type CodalReportDetailResult,
   type CodalReportDiscoveryResult,
   type CodalReportReference
 } from '../data/codal-client';
@@ -54,6 +56,38 @@ function renderCodalDiscovery(result: CodalReportDiscoveryResult): void {
   updateReportLink('[data-popup-codal-link="financial"]', result.financialStatementReport);
 }
 
+function detailStatusText(result: CodalReportDetailResult): string {
+  if (result.status === 'fetched') {
+    const tableText = result.detail?.tables.length
+      ? `${result.detail.tables.length} جدول شناسایی شد`
+      : 'جدولی شناسایی نشد';
+    return `جزئیات دریافت شد - ${tableText}`;
+  }
+  if (result.status === 'unsupported-format') {
+    return 'جزئیات دریافت شد، اما ساختار گزارش پشتیبانی نمی‌شود';
+  }
+  if (result.status === 'unavailable') {
+    return 'جزئیات گزارش در دسترس نیست';
+  }
+  if (result.status === 'timeout') {
+    return 'دریافت جزئیات گزارش به پایان مهلت رسید';
+  }
+  return `خطا در دریافت جزئیات: ${result.errorMessage ?? 'نامشخص'}`;
+}
+
+function renderCodalDetail(result: CodalReportDetailResult): void {
+  setText('[data-popup-codal-detail="status"]', detailStatusText(result));
+  setText(
+    '[data-popup-codal-detail="fetchedAt"]',
+    result.detail?.fetchedAt ? formatPersianTimestamp(new Date(result.detail.fetchedAt)) : '-'
+  );
+
+  const warning = document.querySelector<HTMLElement>('[data-popup-codal-detail="warning"]');
+  if (warning) {
+    warning.hidden = result.status === 'fetched' && Boolean(result.detail?.tables.length);
+  }
+}
+
 async function renderPopup(): Promise<void> {
   const symbol = await getActiveSymbol();
   setText('[data-popup-symbol]', symbol ?? 'نماد نامشخص');
@@ -80,7 +114,18 @@ async function renderPopup(): Promise<void> {
     setText('[data-popup-result="updatedAt"]', formatPersianTimestamp(new Date(record.updatedAt)));
   }
 
-  renderCodalDiscovery(await discoverLatestCodalReports(symbol));
+  const codalResult = await discoverLatestCodalReports(symbol);
+  renderCodalDiscovery(codalResult);
+  const report = codalResult.monthlyActivityReport ?? codalResult.financialStatementReport;
+  if (!report) {
+    renderCodalDetail({
+      status: codalResult.status === 'failed' ? 'network-error' : 'unavailable',
+      errorMessage: codalResult.errorMessage
+    });
+    return;
+  }
+
+  renderCodalDetail(await getReportDetail(report));
 }
 
 void renderPopup();

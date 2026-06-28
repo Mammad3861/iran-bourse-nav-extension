@@ -37,6 +37,27 @@ Current safeguards:
 - The widget and popup show report metadata only: title, date, and link/id when available.
 - Manual NAV inputs remain the source of truth for all NAV calculations.
 
+## Codal Report Detail Foundation
+
+The Codal client can fetch a discovered report detail page by URL, report id, or tracing number when available. The response is normalized into an internal detail object containing:
+
+- Source URL.
+- Symbol, title, publish date, tracing number, and report id when available.
+- Raw HTML or raw JSON.
+- A short plain-text preview with Persian/Arabic digits normalized.
+- Detected table metadata such as table count, row count, column count, captions, and headers.
+- Fetch timestamp.
+
+The parser foundation is intentionally conservative. It strips scripts/styles before text extraction and detects table-like structures without relying on a single CSS selector. It does not extract financial values for NAV calculation.
+
+Detail fetch states are explicit:
+
+- `fetched`
+- `unavailable`
+- `unsupported-format`
+- `network-error`
+- `timeout`
+
 If Codal publishes official API documentation, the client should be updated to follow that contract and this document should link to the official source.
 
 ## TSETMC Data Integration

@@ -12,6 +12,9 @@ This extension provides an estimate, not an audited valuation.
 - Codal report discovery shows report metadata only; it does not parse tables or calculate NAV from Codal.
 - Codal discovery may fail because of endpoint changes, browser/network blocking, rate limits, or unexpected response shapes.
 - A discovered Codal report link or title should be treated as a convenience reference, not a verified data source.
+- Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
+- Detected Codal tables are metadata only. Row and column counts do not imply the report format is supported for automatic extraction.
+- Unsupported Codal report formats are expected and should not block manual NAV calculations.
 
 ## Real TSETMC Page Notes
 

@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   discoverLatestCodalReports,
+  extractTableMetadataFromHtml,
   getLatestFinancialStatement,
   getLatestMonthlyActivityReport,
+  getReportDetail,
+  getReportDetailByTracingNo,
+  getReportDetailByUrl,
+  isFinancialStatementReport,
+  isMonthlyActivityReport,
+  isPortfolioReport,
   searchReportsBySymbol
 } from '../data/codal-client';
 
@@ -11,6 +18,18 @@ function jsonResponse(payload: unknown, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     json: vi.fn().mockResolvedValue(payload)
+  } as unknown as Response;
+}
+
+function detailResponse(body: string | unknown, contentType: string, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: vi.fn(() => contentType)
+    },
+    json: vi.fn().mockResolvedValue(body),
+    text: vi.fn().mockResolvedValue(String(body))
   } as unknown as Response;
 }
 
@@ -232,5 +251,130 @@ describe('codal-client', () => {
 
     expect(result.status).toBe('not-found');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fetches report detail HTML and extracts safe text/table metadata', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const html = `
+      <html>
+        <head><script>alert("x")</script><style>.x{color:red}</style></head>
+        <body>
+          <h1>گزارش فعالیت ماهانه</h1>
+          <table><caption>خلاصه</caption><tr><th>شرح</th><th>مبلغ</th></tr><tr><td>فروش</td><td>۱۲۳</td></tr></table>
+        </body>
+      </html>
+    `;
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse(html, 'text/html'));
+
+    const result = await getReportDetailByUrl('https://www.codal.ir/Reports/Decision.aspx?LetterSerial=abc', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('fetched');
+    expect(result.detail?.rawHtml).toBe(html);
+    expect(result.detail?.plainTextPreview).toContain('گزارش فعالیت ماهانه');
+    expect(result.detail?.plainTextPreview).toContain('123');
+    expect(result.detail?.plainTextPreview).not.toContain('alert');
+    expect(result.detail?.tables[0]).toEqual(
+      expect.objectContaining({
+        rowCount: 2,
+        columnCount: 2,
+        headers: ['شرح', 'مبلغ'],
+        caption: 'خلاصه'
+      })
+    );
+  });
+
+  it('fetches report detail JSON and extracts table-like metadata', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const payload = {
+      tables: [{ title: 'صورت وضعیت', headers: ['دارایی', 'مبلغ'], rows: [['نقد', '۱۰']] }]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse(payload, 'application/json'));
+
+    const result = await getReportDetail(
+      {
+        symbol: 'وغدیر',
+        title: 'صورت‌های مالی',
+        publishedAt: '2026-06-18T09:00:00',
+        url: '/Reports/Decision.aspx?LetterSerial=json'
+      },
+      {
+        fetchImpl: fetchMock as unknown as typeof fetch
+      }
+    );
+
+    expect(result.status).toBe('fetched');
+    expect(result.detail?.symbol).toBe('وغدیر');
+    expect(result.detail?.rawJson).toEqual(payload);
+    expect(result.detail?.plainTextPreview).toContain('10');
+    expect(result.detail?.tables[0]).toEqual(
+      expect.objectContaining({
+        rowCount: 1,
+        columnCount: 2,
+        headers: ['دارایی', 'مبلغ'],
+        caption: 'صورت وضعیت'
+      })
+    );
+  });
+
+  it('constructs a report detail URL from tracing number metadata', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse('<html><body>جزئیات گزارش</body></html>', 'text/html'));
+
+    const result = await getReportDetailByTracingNo('abc123', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('fetched');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://www.codal.ir/Reports/Decision.aspx?LetterSerial=abc123'
+    );
+  });
+
+  it('returns unsupported-format for empty detail content', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse('<html><script>noop()</script></html>', 'text/html'));
+
+    const result = await getReportDetailByUrl('https://www.codal.ir/Reports/Decision.aspx?LetterSerial=empty', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('unsupported-format');
+    expect(result.errorMessage).toContain('no readable content');
+  });
+
+  it('returns timeout detail status when the detail fetch aborts', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('aborted', 'AbortError'));
+
+    const result = await getReportDetailByUrl('https://www.codal.ir/Reports/Decision.aspx?LetterSerial=timeout', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('timeout');
+    expect(result.errorMessage).toContain('timed out');
+  });
+
+  it('extracts table metadata without depending on a single selector', () => {
+    const tables = extractTableMetadataFromHtml(`
+      <section><table><tr><td>A</td><td>B</td></tr></table></section>
+      <div><table><tr><th>H1</th></tr><tr><td>V1</td></tr></table></div>
+    `);
+
+    expect(tables).toHaveLength(2);
+    expect(tables[0]).toEqual(expect.objectContaining({ rowCount: 1, columnCount: 2 }));
+    expect(tables[1]).toEqual(expect.objectContaining({ rowCount: 2, headers: ['H1'] }));
+  });
+
+  it('detects report types from titles', () => {
+    expect(isMonthlyActivityReport('گزارش فعالیت ماهانه دوره ۱ ماهه')).toBe(true);
+    expect(isFinancialStatementReport('صورت‌های مالی سال مالی منتهی')).toBe(true);
+    expect(isPortfolioReport('صورت وضعیت پرتفوی شرکت')).toBe(true);
   });
 });

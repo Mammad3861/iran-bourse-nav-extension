@@ -14,7 +14,8 @@ The first version is intentionally **semi-manual**. It injects a small Persian R
 * Semi-manual NAV calculator
 * Per-symbol local storage
 * TSETMC page injection
-* Placeholder boundaries for future Codal and TSETMC data clients
+* Defensive TSETMC and Codal data-client boundaries
+* Codal report discovery and report-detail metadata foundation
 * Unit-tested NAV and parsing logic
 
 ## Formula
@@ -53,10 +54,11 @@ Current MVP behavior:
 
 ## Privacy and Safety
 
-* No data is sent to any external server by this extension.
+* Manual NAV inputs are not sent to any external server by this extension.
 * All calculations run locally in the browser.
 * User inputs are stored in `chrome.storage.local`.
 * The extension does not scrape aggressively.
+* Optional TSETMC/Codal lookups may send only the searched symbol, InsCode, or report URL/id to those public hosts.
 * Codal and TSETMC integrations should be treated as unstable until verified against live pages.
 * Output is an estimate only and must be verified manually before any financial decision.
 
@@ -147,6 +149,12 @@ public/icons/       Extension icons
 * Show latest available report date
 
 ### v0.4
+
+* Add Codal report detail fetching foundation
+* Detect report type and table metadata
+* Show report detail fetch status without automatic NAV extraction
+
+### v0.5
 
 * Parse selected Codal report fields
 * Add manual correction layer

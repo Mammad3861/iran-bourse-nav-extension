@@ -3,7 +3,13 @@ import { calculateNav, emptyNavInputs } from '../core/nav-calculator';
 import { formatNumberFa, formatPercentRatioFa, parseLocalizedNumber } from '../core/number-utils';
 import { formatPersianTimestamp, toIsoTimestamp } from '../core/persian-date-utils';
 import { getManualOverride, saveManualOverride } from '../data/cache-store';
-import { discoverLatestCodalReports, type CodalReportDiscoveryResult, type CodalReportReference } from '../data/codal-client';
+import {
+  discoverLatestCodalReports,
+  getReportDetail,
+  type CodalReportDetailResult,
+  type CodalReportDiscoveryResult,
+  type CodalReportReference
+} from '../data/codal-client';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
 import styles from './styles.css?inline';
 
@@ -120,6 +126,41 @@ function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryRes
   updateReportLink(root, '[data-ibnav-codal-link="financial"]', result.financialStatementReport);
 }
 
+function detailStatusText(result: CodalReportDetailResult): string {
+  if (result.status === 'fetched') {
+    const tableText = result.detail?.tables.length
+      ? `${result.detail.tables.length} جدول شناسایی شد`
+      : 'جدولی شناسایی نشد';
+    return `جزئیات دریافت شد - ${tableText}`;
+  }
+  if (result.status === 'unsupported-format') {
+    return 'جزئیات دریافت شد، اما ساختار گزارش پشتیبانی نمی‌شود';
+  }
+  if (result.status === 'unavailable') {
+    return 'جزئیات گزارش در دسترس نیست';
+  }
+  if (result.status === 'timeout') {
+    return 'دریافت جزئیات گزارش به پایان مهلت رسید';
+  }
+  return `خطا در دریافت جزئیات: ${result.errorMessage ?? 'نامشخص'}`;
+}
+
+function renderCodalDetail(root: HTMLElement, result: CodalReportDetailResult): void {
+  const status = root.querySelector('[data-ibnav-codal-detail="status"]');
+  const fetchedAt = root.querySelector('[data-ibnav-codal-detail="fetchedAt"]');
+  const warning = root.querySelector<HTMLElement>('[data-ibnav-codal-detail="warning"]');
+
+  if (!status || !fetchedAt || !warning) {
+    return;
+  }
+
+  status.textContent = detailStatusText(result);
+  fetchedAt.textContent = result.detail?.fetchedAt
+    ? formatPersianTimestamp(new Date(result.detail.fetchedAt))
+    : '-';
+  warning.hidden = result.status === 'fetched' && Boolean(result.detail?.tables.length);
+}
+
 export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLElement> {
   ensureStyle();
 
@@ -170,6 +211,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <a class="ibnav-link" data-ibnav-codal-link="monthly" target="_blank" rel="noreferrer" hidden>مشاهده گزارش فعالیت ماهانه</a>
         <div class="ibnav-row"><span>صورت مالی</span><span data-ibnav-codal="financial">-</span></div>
         <a class="ibnav-link" data-ibnav-codal-link="financial" target="_blank" rel="noreferrer" hidden>مشاهده صورت مالی</a>
+        <div class="ibnav-row"><span>جزئیات آخرین گزارش</span><span data-ibnav-codal-detail="status">در انتظار نتیجه جستجو</span></div>
+        <div class="ibnav-row"><span>زمان دریافت جزئیات</span><span data-ibnav-codal-detail="fetchedAt">-</span></div>
+        <p class="ibnav-muted" data-ibnav-codal-detail="warning">ساختار گزارش ممکن است در این نسخه پشتیبانی نشود.</p>
         <p class="ibnav-warning">منبع کدال در این نسخه تأییدشده و پایدار فرض نمی‌شود؛ محاسبه NAV همچنان فقط از ورودی‌های دستی انجام می‌شود.</p>
       </section>
       <p class="ibnav-muted">قیمت فعلی: ${
@@ -184,15 +228,32 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   const updatedAt = saved ? formatPersianTimestamp(new Date(saved.updatedAt)) : formatPersianTimestamp();
   updateResults(root, updatedAt);
   discoverLatestCodalReports(options.symbol)
-    .then((result) => renderCodalDiscovery(root, result))
+    .then(async (result) => {
+      renderCodalDiscovery(root, result);
+      const report = result.monthlyActivityReport ?? result.financialStatementReport;
+      if (!report) {
+        renderCodalDetail(root, {
+          status: result.status === 'failed' ? 'network-error' : 'unavailable',
+          errorMessage: result.errorMessage
+        });
+        return;
+      }
+      renderCodalDetail(root, await getReportDetail(report));
+    })
     .catch((error: unknown) =>
-      renderCodalDiscovery(root, {
+      {
+        renderCodalDiscovery(root, {
         status: 'failed',
         symbol: options.symbol,
         errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
         sourceVerified: false,
         checkedAt: new Date().toISOString()
-      })
+      });
+        renderCodalDetail(root, {
+          status: 'network-error',
+          errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت جزئیات کدال'
+        });
+      }
     );
 
   root.querySelectorAll<HTMLInputElement>('.ibnav-input').forEach((input) => {
