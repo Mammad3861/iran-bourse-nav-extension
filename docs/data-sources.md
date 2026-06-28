@@ -24,11 +24,17 @@ Any future automated source must be reviewed for legality, stability, attributio
 
 The codebase includes a small Codal search client in `src/data/codal-client.ts`.
 
-It uses the public search host currently observed at `https://search.codal.ir/api/search/v2/q` to search reports by symbol, then filters report titles to find the latest monthly activity report or latest financial statement. This endpoint is not treated as an official stable API. It may change, rate-limit clients, return different JSON fields, or stop working without notice.
+It uses the public search host currently observed at `https://search.codal.ir/api/search/v2/q` to search reports by symbol, then filters report titles to find the latest monthly activity/portfolio-status report or latest financial statement. This endpoint is not treated as an official stable API. It may change, rate-limit clients, return different JSON fields, or stop working without notice.
+
+Live smoke testing on 2026-06-28 found:
+
+- Codal symbol search can be sensitive to Persian/Arabic letter variants, especially `ی/ي` and `ک/ك`. The client tries a small set of normalized variants and stops after the first successful result set.
+- Codal's `Length` query parameter behaves like a report-period filter, not a page-size limit. The client uses `Length=-1` to avoid unintentionally filtering out report periods while still requesting only the first result page.
+- Top search results for holding companies can include subsidiary reports or annual board activity reports. Title filtering must stay conservative and metadata should remain unverified until the user reviews it.
 
 Current safeguards:
 
-- No financial values are parsed from Codal reports yet.
+- Financial values parsed from Codal monthly/portfolio reports are suggestions only and are never applied automatically.
 - No single report URL is hardcoded.
 - Requests use a timeout and retry limit.
 - Successful responses are cached in `chrome.storage.local`.

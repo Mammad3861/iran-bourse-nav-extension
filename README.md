@@ -80,6 +80,17 @@ Important notes:
 * Unlisted portfolio valuation is difficult and may require manual input.
 * Different companies may report portfolio data in different formats.
 
+## Current Smoke-Test Status
+
+Limited public smoke testing on 2026-06-28 verified that:
+
+* Lint, unit tests, and TypeScript checks pass locally.
+* A production `dist/` build was generated earlier in the smoke-test session; the final automated rebuild was blocked by a local OS access-denied error while overwriting generated files.
+* Public TSETMC `/instInfo/{InsCode}` pages for sample investment/holding symbols expose ticker/header and latest/closing price text that can be parsed defensively.
+* Public Codal search returns metadata for sample symbols, but may require Persian/Arabic ticker spelling variants.
+* Codal `Length` is treated as a period filter, not a page-size limit; the client keeps it at `-1`.
+* Chrome automation could not open `chrome://extensions/`, so final unpacked-extension loading from `dist/` must be checked manually in Chrome.
+
 ## Development
 
 Install dependencies:

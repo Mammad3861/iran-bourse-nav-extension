@@ -114,6 +114,54 @@ describe('codal-client', () => {
     expect(reports[0].title).toBe('صورت‌های مالی سال مالی منتهی');
   });
 
+  it('falls back to Arabic Yeh/Kaf symbol variants when Codal returns no Persian-spelling matches', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ Total: 0, Letters: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          Total: 1,
+          Letters: [
+            {
+              Symbol: 'وغدیر',
+              CompanyName: 'سرمایه گذاری غدیر',
+              Title: 'اطلاعات و صورت‌های مالی میاندوره‌ای',
+              PublishDateTime: '۱۴۰۵/۰۱/۳۰ ۱۰:۰۴:۵۲'
+            }
+          ]
+        })
+      );
+
+    const reports = await searchReportsBySymbol('وغدیر', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toContain('Symbol=%D9%88%D8%BA%D8%AF%DB%8C%D8%B1');
+    expect(fetchMock.mock.calls[1][0]).toContain('Symbol=%D9%88%D8%BA%D8%AF%D9%8A%D8%B1');
+    expect(reports[0]).toEqual(
+      expect.objectContaining({
+        symbol: 'وغدیر',
+        companyName: 'سرمایه گذاری غدیر'
+      })
+    );
+  });
+
+  it('does not use Codal Length as a page-size parameter', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ Letters: [] }));
+
+    await searchReportsBySymbol('وغدیر', {
+      limit: 50,
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toContain('Length=-1');
+  });
+
   it('retries failed search requests up to the retry limit', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);
@@ -178,6 +226,28 @@ describe('codal-client', () => {
 
     expect(monthly?.publishedAt).toBe('2026-06-22T09:00:00');
     expect(financial?.publishedAt).toBe('2026-06-18T09:00:00');
+  });
+
+  it('treats Codal portfolio status titles as monthly activity candidates for holding companies', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وصندوق',
+            Title: 'صورت وضعیت پورتفوی دوره ۳ ماهه منتهی به ۱۴۰۴/۱۲/۲۹',
+            PublishDateTime: '۱۴۰۵/۰۱/۲۹ ۱۰:۲۵:۴۹'
+          }
+        ]
+      })
+    );
+
+    const monthly = await getLatestMonthlyActivityReport('وصندوق', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(monthly?.title).toContain('صورت وضعیت پورتفوی');
   });
 
   it('returns a found discovery result when relevant reports exist', async () => {
@@ -374,6 +444,7 @@ describe('codal-client', () => {
 
   it('detects report types from titles', () => {
     expect(isMonthlyActivityReport('گزارش فعالیت ماهانه دوره ۱ ماهه')).toBe(true);
+    expect(isMonthlyActivityReport('گزارش فعالیت هیئت مدیره دوره ۱۲ ماهه')).toBe(false);
     expect(isFinancialStatementReport('صورت‌های مالی سال مالی منتهی')).toBe(true);
     expect(isPortfolioReport('صورت وضعیت پرتفوی شرکت')).toBe(true);
   });

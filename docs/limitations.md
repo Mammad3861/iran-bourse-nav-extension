@@ -32,4 +32,20 @@ Observed on a live TSETMC instrument page such as `https://www.tsetmc.com/instIn
 - TSETMC pages include large AG Grid style blocks in text content, so broad page-text parsing can pick up unrelated numbers.
 - `https://cdn.tsetmc.com/api` may be blocked by the browser, profile extensions, network policy, or endpoint changes; DOM fallback and manual price entry must remain available.
 
+Additional smoke testing on 2026-06-28 checked public TSETMC pages for `وغدیر`, `وصندوق`, `وبانک`, `خگستر`, and `وامید`:
+
+- `/instInfo/{InsCode}` pages loaded publicly and exposed visible header/title, latest price, closing price, last price timestamp, and total shares text.
+- The automation environment could not visit `chrome://extensions/`, so loading `dist/` as an unpacked extension must be completed manually in Chrome for a final installed-extension UI check.
+- Because the extension was not loaded through `chrome://extensions/` during this automated smoke test, widget injection, manual-input persistence, and reload restoration could not be fully verified in the live browser session.
+- The content script should continue to show explicit fallback states when symbol, price, or Codal reports cannot be detected.
+
+## Real Codal Notes
+
+Observed during limited public Codal smoke testing on 2026-06-28:
+
+- `search.codal.ir` returned report metadata for sample symbols when Arabic/Persian ticker variants were used.
+- The endpoint rejected `Length=20` with HTTP 400 and described `Length` as a value from `-1` to `12`; this appears to be a period-length filter rather than a result count.
+- Search results can include subsidiary reports and annual board activity reports, so the extension must not treat every `گزارش فعالیت` title as a monthly activity report.
+- Codal detail pages can be large legacy HTML pages. Table extraction must remain defensive and failures must leave the manual NAV calculator usable.
+
 The MVP avoids aggressive scraping and does not run scheduled background collection.

@@ -85,7 +85,12 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_RETRY_LIMIT = 2;
 const DEFAULT_CACHE_TTL_MS = 15 * 60 * 1_000;
 
-const monthlyActivityPatterns = [/فعالیت\s*ماهانه/, /گزارش\s*فعالیت/];
+const monthlyActivityPatterns = [
+  /فعالیت\s*ماهانه/,
+  /گزارش\s*فعالیت\s*ماهانه/,
+  /صورت\s*وضعیت\s*پرتفوی/,
+  /صورت\s*وضعیت\s*پورتفوی/
+];
 const financialStatementPatterns = [/صورت\s*های\s*مالی/, /صورت‌های\s*مالی/, /صورت\s*مالی/];
 
 function codalCacheKey(symbol: string, kind: CodalReportKind | 'all'): string {
@@ -145,14 +150,28 @@ async function setCachedDetail(key: string, result: CodalReportDetailResult): Pr
 
 function buildSearchUrl(symbol: string, limit: number): string {
   const url = new URL(CODAL_SEARCH_ENDPOINT);
+  void limit;
   url.searchParams.set('search', 'true');
   url.searchParams.set('Symbol', symbol);
   url.searchParams.set('PageNumber', '1');
-  url.searchParams.set('Length', String(limit));
+  // Codal's Length parameter is a period-length filter, not a page-size limit.
+  // -1 keeps discovery broad while still requesting only the first result page.
+  url.searchParams.set('Length', '-1');
   url.searchParams.set('LetterType', '-1');
   url.searchParams.set('Category', '-1');
   url.searchParams.set('CompanyType', '-1');
   return url.toString();
+}
+
+function codalSymbolVariants(symbol: string): string[] {
+  const normalized = normalizePersianArabicDigits(symbol).trim();
+  const variants = [
+    normalized,
+    normalized.replace(/ی/g, 'ي').replace(/ک/g, 'ك'),
+    normalized.replace(/ي/g, 'ی').replace(/ك/g, 'ک')
+  ];
+
+  return [...new Set(variants.filter(Boolean))];
 }
 
 function absoluteCodalUrl(value: unknown): string | undefined {
@@ -480,7 +499,7 @@ export async function searchReportsBySymbol(
   symbol: string,
   options: CodalSearchOptions = {}
 ): Promise<CodalReportReference[]> {
-  const normalizedSymbol = symbol.trim();
+  const normalizedSymbol = normalizePersianArabicDigits(symbol).trim();
   if (!normalizedSymbol) {
     throw new Error('Codal search requires a non-empty symbol.');
   }
@@ -496,12 +515,20 @@ export async function searchReportsBySymbol(
     return cached;
   }
 
-  const payload = await fetchWithRetry(buildSearchUrl(normalizedSymbol, limit), {
-    timeoutMs,
-    retryLimit,
-    fetchImpl
-  });
-  const reports = sortReportsNewestFirst(extractReports(payload, normalizedSymbol));
+  let reports: CodalReportReference[] = [];
+  for (const variant of codalSymbolVariants(normalizedSymbol)) {
+    const payload = await fetchWithRetry(buildSearchUrl(variant, limit), {
+      timeoutMs,
+      retryLimit,
+      fetchImpl
+    });
+    reports = extractReports(payload, normalizedSymbol);
+    if (reports.length > 0) {
+      break;
+    }
+  }
+
+  reports = sortReportsNewestFirst(reports);
   await setCachedReports(normalizedSymbol, 'all', reports);
   return reports;
 }
