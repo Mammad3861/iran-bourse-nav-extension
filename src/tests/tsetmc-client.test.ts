@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  detectCurrentTsetmcSymbol,
+  detectInsCodeFromUrl,
   getInstrumentInfoByInsCode,
   getLatestPriceByInsCode,
+  readClosingPriceFromDocument,
+  readCurrentPriceFromDocument,
   searchSymbols
 } from '../data/tsetmc-client';
 
@@ -190,5 +194,45 @@ describe('tsetmc-client', () => {
       })
     ).rejects.toThrow('TSETMC request failed after 2 attempt(s): TSETMC request failed with HTTP 503.');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('detects InsCode from current TSETMC instrument URLs', () => {
+    expect(detectInsCodeFromUrl('https://www.tsetmc.com/instInfo/778253364357513')).toBe(
+      '778253364357513'
+    );
+    expect(detectInsCodeFromUrl('https://old.tsetmc.com/Loader.aspx?ParTree=151311&i=778253364357513')).toBe(
+      '778253364357513'
+    );
+  });
+
+  it('detects symbol from the real TSETMC header pattern instead of the instInfo path', () => {
+    const header = { textContent: 'بانك ملت (وبملت) - بازار اول (تابلوی اصلی) بورس' };
+    const documentMock = {
+      querySelectorAll: vi.fn((selector: string) => {
+        if (selector.includes('bigheader')) {
+          return [header];
+        }
+        return [];
+      }),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    expect(
+      detectCurrentTsetmcSymbol(documentMock, 'https://www.tsetmc.com/instInfo/778253364357513')
+    ).toEqual({ symbol: 'وبملت', source: 'dom' });
+  });
+
+  it('reads latest and closing prices from compact TSETMC table rows', () => {
+    const rows = [
+      { textContent: 'آخرین معامله1,255 (38) [2.94%-]' },
+      { textContent: 'قیمت پایانی1,256 (37) [2.86%-]' }
+    ];
+    const documentMock = {
+      querySelectorAll: vi.fn((selector: string) => (selector.includes('tr') ? rows : [])),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    expect(readCurrentPriceFromDocument(documentMock)).toBe(1255);
+    expect(readClosingPriceFromDocument(documentMock)).toBe(1256);
   });
 });

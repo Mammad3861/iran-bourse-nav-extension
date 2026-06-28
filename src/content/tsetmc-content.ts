@@ -4,7 +4,7 @@ import { renderNavWidget } from '../ui/nav-widget';
 
 async function boot(): Promise<void> {
   const snapshot = snapshotTsetmcPage(document, window.location.href);
-  const symbol = snapshot.symbol ?? 'نماد نامشخص';
+  const symbol = snapshot.symbol ?? (snapshot.insCode ? `InsCode:${snapshot.insCode}` : 'نماد نامشخص');
 
   await setActiveSymbol(symbol);
   await renderNavWidget({

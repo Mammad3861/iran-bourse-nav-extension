@@ -44,8 +44,10 @@ export interface TsetmcPriceOptions extends TsetmcClientOptions {
 
 export interface TsetmcPageSnapshot {
   symbol?: string;
+  insCode?: string;
   symbolSource: SymbolDetectionResult['source'];
   currentPrice?: number;
+  closingPrice?: number;
   capturedAt: string;
 }
 
@@ -66,6 +68,26 @@ const priceSelectors = [
   '.last-price',
   '.price:last-child'
 ];
+
+const tsetmcSymbolPatterns = [
+  /\(([\u0600-\u06ffA-Za-z0-9_-]{2,20})\)/,
+  /نماد\s*[:：]?\s*([\u0600-\u06ffA-Za-z0-9_-]{2,20})/
+];
+
+export function detectInsCodeFromUrl(href: string): string | undefined {
+  try {
+    const parsed = new URL(href);
+    const queryValue = parsed.searchParams.get('i') ?? parsed.searchParams.get('insCode');
+    if (queryValue && /^\d{5,}$/.test(queryValue)) {
+      return queryValue;
+    }
+
+    const instInfoMatch = parsed.pathname.match(/\/instInfo\/(\d{5,})/i);
+    return instInfoMatch?.[1];
+  } catch {
+    return undefined;
+  }
+}
 
 function hasChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local);
@@ -387,15 +409,65 @@ export async function getLatestPriceByInsCode(
 }
 
 export function detectCurrentTsetmcSymbol(documentRef: Document, href: string): SymbolDetectionResult {
+  const insCode = detectInsCodeFromUrl(href);
   const fromUrl = detectSymbolFromUrl(href);
-  if (fromUrl.symbol) {
+  if (fromUrl.symbol && fromUrl.symbol !== 'instInfo' && fromUrl.symbol !== insCode) {
     return fromUrl;
   }
 
-  return detectSymbolFromDocument(documentRef);
+  const headerText = Array.from(
+    documentRef.querySelectorAll('.bigheader, .header.bigheader, #MainBox, h1, h2, title')
+  )
+    .map((node) => node.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+    .find((text) => text.length > 0);
+
+  if (headerText) {
+    for (const pattern of tsetmcSymbolPatterns) {
+      const match = headerText.match(pattern);
+      if (match?.[1]) {
+        return { symbol: match[1], source: 'dom' };
+      }
+    }
+  }
+
+  const compactSymbol = Array.from(documentRef.querySelectorAll('#MainBox span, .bigheader span'))
+    .map((node) => node.textContent?.trim() ?? '')
+    .find((text) => /^[\u0600-\u06ffA-Za-z0-9_-]{2,20}$/.test(text) && !/بورس|بازار|تابلو/.test(text));
+
+  if (compactSymbol) {
+    return { symbol: compactSymbol, source: 'dom' };
+  }
+
+  const fromDocument = detectSymbolFromDocument(documentRef);
+  return fromDocument.symbol === 'instInfo' ? { source: 'unknown' } : fromDocument;
+}
+
+function parseFirstNumberAfterLabel(text: string, label: string): number | undefined {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  const labelIndex = compact.indexOf(label);
+  if (labelIndex < 0) {
+    return undefined;
+  }
+
+  const afterLabel = compact.slice(labelIndex + label.length);
+  const match = afterLabel.match(/[+-]?[۰-۹٠-٩\d][۰-۹٠-٩\d,٬٫.]*/);
+  return parseLocalizedNumber(match?.[0]);
+}
+
+function readLabeledPriceFromRows(documentRef: Document, label: string): number | undefined {
+  const rowText = Array.from(documentRef.querySelectorAll('#TopBox tr, #MainContent tr, #MainBox tr, tr'))
+    .map((node) => node.textContent ?? '')
+    .find((text) => text.includes(label));
+
+  return rowText ? parseFirstNumberAfterLabel(rowText, label) : undefined;
 }
 
 export function readCurrentPriceFromDocument(documentRef: Document): number | undefined {
+  const labeledLastTrade = readLabeledPriceFromRows(documentRef, 'آخرین معامله');
+  if (labeledLastTrade !== undefined && labeledLastTrade > 0) {
+    return labeledLastTrade;
+  }
+
   for (const selector of priceSelectors) {
     const text = documentRef.querySelector(selector)?.textContent;
     const price = parseLocalizedNumber(text);
@@ -411,13 +483,24 @@ export function readCurrentPriceFromDocument(documentRef: Document): number | un
   return parseLocalizedNumber(likelyPriceText);
 }
 
+export function readClosingPriceFromDocument(documentRef: Document): number | undefined {
+  const labeledClosing = readLabeledPriceFromRows(documentRef, 'قیمت پایانی');
+  if (labeledClosing !== undefined && labeledClosing > 0) {
+    return labeledClosing;
+  }
+
+  return undefined;
+}
+
 export function snapshotTsetmcPage(documentRef: Document, href: string): TsetmcPageSnapshot {
   const detected = detectCurrentTsetmcSymbol(documentRef, href);
 
   return {
     symbol: detected.symbol,
+    insCode: detectInsCodeFromUrl(href),
     symbolSource: detected.source,
     currentPrice: readCurrentPriceFromDocument(documentRef),
+    closingPrice: readClosingPriceFromDocument(documentRef),
     capturedAt: new Date().toISOString()
   };
 }

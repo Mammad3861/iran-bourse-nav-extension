@@ -116,7 +116,11 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <div class="ibnav-row"><span>زمان داده</span><span data-ibnav-result="updatedAt">-</span></div>
       </div>
       <button type="button" class="ibnav-save">ذخیره برای این نماد</button>
-      <p class="ibnav-muted">قیمت فعلی: ${options.currentPriceSource === 'page' ? 'خوانده‌شده از صفحه' : 'ورودی دستی'}</p>
+      <p class="ibnav-muted">قیمت فعلی: ${
+        options.currentPriceSource === 'page'
+          ? 'خوانده‌شده از صفحه'
+          : 'از صفحه تشخیص داده نشد؛ در صورت نیاز دستی وارد کنید'
+      }</p>
       <p class="ibnav-warning">این خروجی فقط یک برآورد محلی است و توصیه سرمایه‌گذاری محسوب نمی‌شود.</p>
     </div>
   `;
