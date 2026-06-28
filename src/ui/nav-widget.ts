@@ -10,6 +10,12 @@ import {
   type CodalReportDiscoveryResult,
   type CodalReportReference
 } from '../data/codal-client';
+import {
+  parseMonthlyActivityReport,
+  type ExtractedPortfolioValue,
+  type MonthlyActivityParseResult,
+  type PortfolioValueKind
+} from '../data/codal-monthly-parser';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
 import styles from './styles.css?inline';
 
@@ -161,6 +167,73 @@ function renderCodalDetail(root: HTMLElement, result: CodalReportDetailResult): 
   warning.hidden = result.status === 'fetched' && Boolean(result.detail?.tables.length);
 }
 
+function suggestionTarget(kind: PortfolioValueKind): keyof NavInputs | undefined {
+  if (kind === 'listedPortfolioCostValue') return 'listedPortfolioCostValue';
+  if (kind === 'listedPortfolioMarketValue') return 'listedPortfolioMarketValue';
+  if (kind === 'unlistedPortfolioSurplusSuggestion') return 'unlistedPortfolioSurplus';
+  return undefined;
+}
+
+function suggestionText(value: ExtractedPortfolioValue): string {
+  const confidence =
+    value.confidence === 'high' ? 'اطمینان بالا' : value.confidence === 'medium' ? 'اطمینان متوسط' : 'اطمینان پایین';
+  return `${value.label}: ${formatNumberFa(value.value)} (${confidence})`;
+}
+
+function renderMonthlySuggestions(root: HTMLElement, result: MonthlyActivityParseResult): void {
+  const status = root.querySelector('[data-ibnav-suggestions="status"]');
+  const source = root.querySelector('[data-ibnav-suggestions="source"]');
+  const list = root.querySelector<HTMLElement>('[data-ibnav-suggestions="list"]');
+  const warnings = root.querySelector('[data-ibnav-suggestions="warnings"]');
+
+  if (!status || !source || !list || !warnings) {
+    return;
+  }
+
+  status.textContent =
+    result.status === 'parsed'
+      ? 'پیشنهادهای قابل بررسی پیدا شد'
+      : result.status === 'ambiguous'
+        ? 'نتیجه کدال نیاز به بررسی دستی دارد'
+        : 'پیشنهاد قابل اتکا پیدا نشد';
+  source.textContent = result.reportPeriod
+    ? `${result.reportTitle ?? 'گزارش کدال'} - ${result.reportPeriod}`
+    : result.reportTitle ?? '-';
+  warnings.textContent = result.warnings.length ? result.warnings.join(' ') : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.';
+
+  list.textContent = '';
+  for (const value of result.extractedValues) {
+    const item = document.createElement('div');
+    item.className = 'ibnav-suggestion';
+    const text = document.createElement('span');
+    text.textContent = suggestionText(value);
+    item.appendChild(text);
+
+    const target = suggestionTarget(value.kind);
+    if (target) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ibnav-apply';
+      button.textContent = 'اعمال دستی';
+      button.addEventListener('click', () => {
+        const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${target}"]`);
+        if (!input) return;
+        input.value = String(value.value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      item.appendChild(button);
+    }
+
+    if (value.warning) {
+      const warning = document.createElement('small');
+      warning.className = 'ibnav-muted';
+      warning.textContent = value.warning;
+      item.appendChild(warning);
+    }
+    list.appendChild(item);
+  }
+}
+
 export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLElement> {
   ensureStyle();
 
@@ -214,6 +287,13 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <div class="ibnav-row"><span>جزئیات آخرین گزارش</span><span data-ibnav-codal-detail="status">در انتظار نتیجه جستجو</span></div>
         <div class="ibnav-row"><span>زمان دریافت جزئیات</span><span data-ibnav-codal-detail="fetchedAt">-</span></div>
         <p class="ibnav-muted" data-ibnav-codal-detail="warning">ساختار گزارش ممکن است در این نسخه پشتیبانی نشود.</p>
+        <div class="ibnav-suggestions">
+          <h4 class="ibnav-subtitle">مقادیر پیشنهادی از کدال</h4>
+          <p class="ibnav-muted" data-ibnav-suggestions="status">در انتظار دریافت جزئیات گزارش</p>
+          <p class="ibnav-muted" data-ibnav-suggestions="source">-</p>
+          <div class="ibnav-suggestion-list" data-ibnav-suggestions="list"></div>
+          <p class="ibnav-warning" data-ibnav-suggestions="warnings">هیچ مقدار پیشنهادی به صورت خودکار اعمال نمی‌شود.</p>
+        </div>
         <p class="ibnav-warning">منبع کدال در این نسخه تأییدشده و پایدار فرض نمی‌شود؛ محاسبه NAV همچنان فقط از ورودی‌های دستی انجام می‌شود.</p>
       </section>
       <p class="ibnav-muted">قیمت فعلی: ${
@@ -238,7 +318,11 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         });
         return;
       }
-      renderCodalDetail(root, await getReportDetail(report));
+      const detailResult = await getReportDetail(report);
+      renderCodalDetail(root, detailResult);
+      if (detailResult.detail) {
+        renderMonthlySuggestions(root, parseMonthlyActivityReport(detailResult.detail));
+      }
     })
     .catch((error: unknown) =>
       {

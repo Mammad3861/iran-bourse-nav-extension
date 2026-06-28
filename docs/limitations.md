@@ -15,6 +15,10 @@ This extension provides an estimate, not an audited valuation.
 - Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
 - Detected Codal tables are metadata only. Row and column counts do not imply the report format is supported for automatic extraction.
 - Unsupported Codal report formats are expected and should not block manual NAV calculations.
+- Codal monthly parser outputs are suggestions only and can be wrong when labels are ambiguous, report formats vary, units differ, numbers are malformed, or tables contain totals/subtotals in unexpected places.
+- The parser does not infer units, audit restatements, capital increases, or post-report adjustments.
+- Unlisted portfolio surplus suggestions are low confidence because they are derived from reported cost and estimated values and may not match the project’s NAV assumptions.
+- Parsed Codal values never overwrite manual inputs automatically.
 
 ## Real TSETMC Page Notes
 

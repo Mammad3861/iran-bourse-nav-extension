@@ -50,6 +50,23 @@ The Codal client can fetch a discovered report detail page by URL, report id, or
 
 The parser foundation is intentionally conservative. It strips scripts/styles before text extraction and detects table-like structures without relying on a single CSS selector. It does not extract financial values for NAV calculation.
 
+## Limited Monthly Activity Parser
+
+The codebase includes a cautious parser in `src/data/codal-monthly-parser.ts` for Codal monthly activity reports of investment and holding companies.
+
+It may suggest these candidate values when labels and tables are clear enough:
+
+- Listed portfolio cost value.
+- Listed portfolio market/day value.
+- Unlisted portfolio cost value.
+- Unlisted portfolio estimated value.
+- A low-confidence unlisted surplus suggestion when both unlisted cost and estimated value are present.
+- Report period/date when detectable from the title or preview.
+
+These values are suggestions only. The widget can copy supported suggestions into manual fields only after the user clicks an explicit apply action. No parsed value is applied automatically, and no parsed value is used for NAV calculation unless the user manually accepts or edits it.
+
+The parser supports Persian and Arabic digit normalization, comma-separated numbers, and common Persian labels such as `بهای تمام شده`, `ارزش بازار`, `ارزش روز`, `پذیرفته شده در بورس`, `خارج از بورس`, `پرتفوی بورسی`, and `پرتفوی غیر بورسی`.
+
 Detail fetch states are explicit:
 
 - `fetched`

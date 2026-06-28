@@ -16,6 +16,7 @@ The first version is intentionally **semi-manual**. It injects a small Persian R
 * TSETMC page injection
 * Defensive TSETMC and Codal data-client boundaries
 * Codal report discovery and report-detail metadata foundation
+* Limited Codal monthly activity parser for suggested portfolio values
 * Unit-tested NAV and parsing logic
 
 ## Formula
@@ -51,6 +52,8 @@ Current MVP behavior:
    * NAV per share
    * P/NAV
 6. Stores values locally per symbol.
+7. Shows Codal report metadata and limited suggested values when available.
+8. Requires explicit user action before any suggestion is copied into manual inputs.
 
 ## Privacy and Safety
 
@@ -156,9 +159,15 @@ public/icons/       Extension icons
 
 ### v0.5
 
-* Parse selected Codal report fields
+* Parse selected Codal monthly activity fields as suggestions
 * Add manual correction layer
 * Add confidence/warning labels for extracted values
+
+### v0.6
+
+* Improve parser coverage with more real report fixtures
+* Add unit/scale hints for suggested values
+* Add stronger review workflow before accepting parsed values
 
 ### v1.0
 

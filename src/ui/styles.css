@@ -157,6 +157,35 @@
   text-decoration: underline;
 }
 
+.ibnav-suggestions,
+.ibnav-suggestion-list {
+  display: grid;
+  gap: 7px;
+}
+
+.ibnav-suggestion {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #d7dfdc;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 7px 8px;
+}
+
+.ibnav-apply {
+  justify-self: start;
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f766e;
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
 .ibnav-warning {
   border-radius: 6px;
   background: #fff8e1;

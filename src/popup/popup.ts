@@ -9,6 +9,11 @@ import {
   type CodalReportDiscoveryResult,
   type CodalReportReference
 } from '../data/codal-client';
+import {
+  parseMonthlyActivityReport,
+  type ExtractedPortfolioValue,
+  type MonthlyActivityParseResult
+} from '../data/codal-monthly-parser';
 import '../ui/styles.css';
 
 function setText(selector: string, value: string): void {
@@ -88,6 +93,43 @@ function renderCodalDetail(result: CodalReportDetailResult): void {
   }
 }
 
+function suggestionText(value: ExtractedPortfolioValue): string {
+  const confidence =
+    value.confidence === 'high' ? 'اطمینان بالا' : value.confidence === 'medium' ? 'اطمینان متوسط' : 'اطمینان پایین';
+  return `${value.label}: ${formatNumberFa(value.value)} (${confidence})`;
+}
+
+function renderMonthlySuggestions(result: MonthlyActivityParseResult): void {
+  setText(
+    '[data-popup-suggestions="status"]',
+    result.status === 'parsed'
+      ? 'پیشنهادهای قابل بررسی پیدا شد'
+      : result.status === 'ambiguous'
+        ? 'نتیجه کدال نیاز به بررسی دستی دارد'
+        : 'پیشنهاد قابل اتکا پیدا نشد'
+  );
+  setText(
+    '[data-popup-suggestions="source"]',
+    result.reportPeriod
+      ? `${result.reportTitle ?? 'گزارش کدال'} - ${result.reportPeriod}`
+      : result.reportTitle ?? '-'
+  );
+  setText(
+    '[data-popup-suggestions="warnings"]',
+    result.warnings.length ? result.warnings.join(' ') : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.'
+  );
+
+  const list = document.querySelector<HTMLElement>('[data-popup-suggestions="list"]');
+  if (!list) return;
+  list.textContent = '';
+  for (const value of result.extractedValues) {
+    const item = document.createElement('div');
+    item.className = 'ibnav-suggestion';
+    item.textContent = suggestionText(value);
+    list.appendChild(item);
+  }
+}
+
 async function renderPopup(): Promise<void> {
   const symbol = await getActiveSymbol();
   setText('[data-popup-symbol]', symbol ?? 'نماد نامشخص');
@@ -125,7 +167,11 @@ async function renderPopup(): Promise<void> {
     return;
   }
 
-  renderCodalDetail(await getReportDetail(report));
+  const detailResult = await getReportDetail(report);
+  renderCodalDetail(detailResult);
+  if (detailResult.detail) {
+    renderMonthlySuggestions(parseMonthlyActivityReport(detailResult.detail));
+  }
 }
 
 void renderPopup();
