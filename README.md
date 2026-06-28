@@ -54,6 +54,7 @@ Current MVP behavior:
 6. Stores values locally per symbol.
 7. Shows Codal report metadata and limited suggested values when available.
 8. Requires explicit user action before any suggestion is copied into manual inputs.
+9. Stores source metadata when a Codal suggestion is user-applied, and marks the field manual again after manual edits.
 
 ## Privacy and Safety
 
@@ -160,7 +161,8 @@ public/icons/       Extension icons
 ### v0.5
 
 * Parse selected Codal monthly activity fields as suggestions
-* Add manual correction layer
+* Add explicit apply/ignore flow for suggested values
+* Add manual correction and source metadata layer
 * Add confidence/warning labels for extracted values
 
 ### v0.6

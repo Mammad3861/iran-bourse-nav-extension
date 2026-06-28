@@ -186,6 +186,15 @@
   padding: 4px 8px;
 }
 
+.ibnav-secondary {
+  border-color: #cbd5d1;
+  color: #3d4a47;
+}
+
+[data-ibnav-suggestions='applyStatus'][data-state='error'] {
+  color: #b42318;
+}
+
 .ibnav-warning {
   border-radius: 6px;
   background: #fff8e1;

@@ -19,6 +19,8 @@ This extension provides an estimate, not an audited valuation.
 - The parser does not infer units, audit restatements, capital increases, or post-report adjustments.
 - Unlisted portfolio surplus suggestions are low confidence because they are derived from reported cost and estimated values and may not match the project’s NAV assumptions.
 - Parsed Codal values never overwrite manual inputs automatically.
+- Applying all suggestions only applies high-confidence, mappable fields. Low-confidence and ambiguous values require individual review.
+- Source metadata is an audit aid, not proof that a parsed value is correct.
 
 ## Real TSETMC Page Notes
 

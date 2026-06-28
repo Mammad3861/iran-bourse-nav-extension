@@ -13,10 +13,15 @@ import {
 import {
   parseMonthlyActivityReport,
   type ExtractedPortfolioValue,
-  type MonthlyActivityParseResult,
-  type PortfolioValueKind
+  type MonthlyActivityParseResult
 } from '../data/codal-monthly-parser';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
+import {
+  applyHighConfidenceSuggestionsToRecord,
+  applySuggestionToRecord,
+  markFieldAsManual,
+  suggestionTarget
+} from '../data/suggestion-application';
 import styles from './styles.css?inline';
 
 export interface NavWidgetOptions {
@@ -167,26 +172,53 @@ function renderCodalDetail(root: HTMLElement, result: CodalReportDetailResult): 
   warning.hidden = result.status === 'fetched' && Boolean(result.detail?.tables.length);
 }
 
-function suggestionTarget(kind: PortfolioValueKind): keyof NavInputs | undefined {
-  if (kind === 'listedPortfolioCostValue') return 'listedPortfolioCostValue';
-  if (kind === 'listedPortfolioMarketValue') return 'listedPortfolioMarketValue';
-  if (kind === 'unlistedPortfolioSurplusSuggestion') return 'unlistedPortfolioSurplus';
-  return undefined;
-}
-
 function suggestionText(value: ExtractedPortfolioValue): string {
   const confidence =
     value.confidence === 'high' ? 'اطمینان بالا' : value.confidence === 'medium' ? 'اطمینان متوسط' : 'اطمینان پایین';
   return `${value.label}: ${formatNumberFa(value.value)} (${confidence})`;
 }
 
-function renderMonthlySuggestions(root: HTMLElement, result: MonthlyActivityParseResult): void {
+function recordFromCurrentInputs(
+  root: HTMLElement,
+  symbol: string,
+  currentPriceSource: ManualOverrideRecord['currentPriceSource'],
+  previous?: ManualOverrideRecord
+): ManualOverrideRecord {
+  return {
+    symbol,
+    inputs: readInputs(root),
+    currentPriceSource,
+    updatedAt: toIsoTimestamp(),
+    fieldSources: { ...(previous?.fieldSources ?? {}) }
+  };
+}
+
+function setApplyStatus(root: HTMLElement, message: string, isError = false): void {
+  const status = root.querySelector<HTMLElement>('[data-ibnav-suggestions="applyStatus"]');
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = isError ? 'error' : 'ok';
+}
+
+async function persistAppliedRecord(root: HTMLElement, record: ManualOverrideRecord): Promise<void> {
+  await saveManualOverride(record);
+  updateResults(root, formatPersianTimestamp(new Date(record.updatedAt)));
+}
+
+function renderMonthlySuggestions(
+  root: HTMLElement,
+  result: MonthlyActivityParseResult,
+  options: NavWidgetOptions,
+  getRecord: () => ManualOverrideRecord | undefined,
+  setRecord: (record: ManualOverrideRecord) => void
+): void {
   const status = root.querySelector('[data-ibnav-suggestions="status"]');
   const source = root.querySelector('[data-ibnav-suggestions="source"]');
   const list = root.querySelector<HTMLElement>('[data-ibnav-suggestions="list"]');
   const warnings = root.querySelector('[data-ibnav-suggestions="warnings"]');
+  const applyAll = root.querySelector<HTMLButtonElement>('[data-ibnav-suggestions="applyAll"]');
 
-  if (!status || !source || !list || !warnings) {
+  if (!status || !source || !list || !warnings || !applyAll) {
     return;
   }
 
@@ -202,32 +234,104 @@ function renderMonthlySuggestions(root: HTMLElement, result: MonthlyActivityPars
   warnings.textContent = result.warnings.length ? result.warnings.join(' ') : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.';
 
   list.textContent = '';
+  applyAll.hidden = !result.extractedValues.some(
+    (value) => value.confidence === 'high' && suggestionTarget(value.kind)
+  );
+  applyAll.onclick = async () => {
+    const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
+    const next = applyHighConfidenceSuggestionsToRecord(current, result, {
+      symbol: options.symbol,
+      currentPriceSource: options.currentPriceSource,
+      reportTitle: result.reportTitle,
+      reportDate: result.reportPeriod
+    });
+
+    for (const [field, value] of Object.entries(next.inputs) as Array<[keyof NavInputs, number | undefined]>) {
+      const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${field}"]`);
+      if (input && value !== undefined) {
+        input.value = String(value);
+      }
+    }
+
+    try {
+      await persistAppliedRecord(root, next);
+      setRecord(next);
+      setApplyStatus(root, 'همه موارد قابل اعتماد با تأیید شما اعمال و ذخیره شد.');
+    } catch (error) {
+      setApplyStatus(
+        root,
+        `ذخیره مقدارهای پیشنهادی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+        true
+      );
+    }
+  };
+
+  if (result.extractedValues.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'ibnav-muted';
+    empty.textContent = 'مقدار پیشنهادی قابل اعمالی پیدا نشد.';
+    list.appendChild(empty);
+  }
+
   for (const value of result.extractedValues) {
     const item = document.createElement('div');
     item.className = 'ibnav-suggestion';
     const text = document.createElement('span');
     text.textContent = suggestionText(value);
     item.appendChild(text);
+    const sourceLine = document.createElement('small');
+    sourceLine.className = 'ibnav-muted';
+    sourceLine.textContent = result.reportPeriod
+      ? `${result.reportTitle ?? 'گزارش کدال'} - ${result.reportPeriod}`
+      : result.reportTitle ?? 'گزارش کدال';
+    item.appendChild(sourceLine);
 
     const target = suggestionTarget(value.kind);
     if (target) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'ibnav-apply';
-      button.textContent = 'اعمال دستی';
-      button.addEventListener('click', () => {
+      button.textContent = 'اعمال مقدار پیشنهادی';
+      button.addEventListener('click', async () => {
         const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${target}"]`);
         if (!input) return;
         input.value = String(value.value);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
+        const next = applySuggestionToRecord(current, value, {
+          symbol: options.symbol,
+          currentPriceSource: options.currentPriceSource,
+          reportTitle: result.reportTitle,
+          reportDate: result.reportPeriod
+        });
+        try {
+          await persistAppliedRecord(root, next);
+          setRecord(next);
+          setApplyStatus(root, 'مقدار پیشنهادی با تأیید شما اعمال و ذخیره شد.');
+        } catch (error) {
+          setApplyStatus(
+            root,
+            `ذخیره مقدار پیشنهادی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+            true
+          );
+        }
       });
       item.appendChild(button);
     }
 
-    if (value.warning) {
+    const ignoreButton = document.createElement('button');
+    ignoreButton.type = 'button';
+    ignoreButton.className = 'ibnav-apply ibnav-secondary';
+    ignoreButton.textContent = 'نادیده گرفتن';
+    ignoreButton.addEventListener('click', () => {
+      item.remove();
+      setApplyStatus(root, 'پیشنهاد نادیده گرفته شد.');
+    });
+    item.appendChild(ignoreButton);
+
+    if (value.warning || value.confidence === 'low') {
       const warning = document.createElement('small');
       warning.className = 'ibnav-muted';
-      warning.textContent = value.warning;
+      warning.textContent = value.warning ?? 'این مقدار با اطمینان پایین استخراج شده است.';
       item.appendChild(warning);
     }
     list.appendChild(item);
@@ -240,8 +344,8 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   const existing = document.getElementById('ibnav-widget');
   existing?.remove();
 
-  const saved = await getManualOverride(options.symbol);
-  const inputs = saved?.inputs ?? emptyNavInputs();
+  let activeRecord = await getManualOverride(options.symbol);
+  const inputs = activeRecord?.inputs ?? emptyNavInputs();
   inputs.currentPrice = inputs.currentPrice ?? options.currentPrice;
 
   const root = document.createElement('section');
@@ -291,8 +395,10 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           <h4 class="ibnav-subtitle">مقادیر پیشنهادی از کدال</h4>
           <p class="ibnav-muted" data-ibnav-suggestions="status">در انتظار دریافت جزئیات گزارش</p>
           <p class="ibnav-muted" data-ibnav-suggestions="source">-</p>
+          <button type="button" class="ibnav-save" data-ibnav-suggestions="applyAll" hidden>اعمال همه موارد قابل اعتماد</button>
           <div class="ibnav-suggestion-list" data-ibnav-suggestions="list"></div>
-          <p class="ibnav-warning" data-ibnav-suggestions="warnings">هیچ مقدار پیشنهادی به صورت خودکار اعمال نمی‌شود.</p>
+          <p class="ibnav-warning" data-ibnav-suggestions="warnings">هیچ مقداری بدون تأیید شما جایگزین نمی‌شود.</p>
+          <p class="ibnav-muted" data-ibnav-suggestions="applyStatus"></p>
         </div>
         <p class="ibnav-warning">منبع کدال در این نسخه تأییدشده و پایدار فرض نمی‌شود؛ محاسبه NAV همچنان فقط از ورودی‌های دستی انجام می‌شود.</p>
       </section>
@@ -305,7 +411,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     </div>
   `;
 
-  const updatedAt = saved ? formatPersianTimestamp(new Date(saved.updatedAt)) : formatPersianTimestamp();
+  const updatedAt = activeRecord ? formatPersianTimestamp(new Date(activeRecord.updatedAt)) : formatPersianTimestamp();
   updateResults(root, updatedAt);
   discoverLatestCodalReports(options.symbol)
     .then(async (result) => {
@@ -321,7 +427,15 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       const detailResult = await getReportDetail(report);
       renderCodalDetail(root, detailResult);
       if (detailResult.detail) {
-        renderMonthlySuggestions(root, parseMonthlyActivityReport(detailResult.detail));
+        renderMonthlySuggestions(
+          root,
+          parseMonthlyActivityReport(detailResult.detail),
+          options,
+          () => activeRecord,
+          (record) => {
+            activeRecord = record;
+          }
+        );
       }
     })
     .catch((error: unknown) =>
@@ -341,7 +455,15 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     );
 
   root.querySelectorAll<HTMLInputElement>('.ibnav-input').forEach((input) => {
-    input.addEventListener('input', () => updateResults(root, formatPersianTimestamp()));
+    input.addEventListener('input', () => {
+      const field = input.dataset.ibnavField as keyof NavInputs | undefined;
+      const parsed = parseLocalizedNumber(input.value);
+      if (field && activeRecord?.fieldSources?.[field]?.source === 'codal-suggestion') {
+        activeRecord = markFieldAsManual(activeRecord, field, parsed);
+        setApplyStatus(root, 'ویرایش دستی ثبت شد؛ منبع این مقدار اکنون دستی است.');
+      }
+      updateResults(root, formatPersianTimestamp());
+    });
   });
 
   root.querySelector<HTMLButtonElement>('.ibnav-collapse')?.addEventListener('click', (event) => {
@@ -355,10 +477,21 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       symbol: options.symbol,
       inputs: readInputs(root),
       currentPriceSource: options.currentPriceSource,
-      updatedAt: toIsoTimestamp()
+      updatedAt: toIsoTimestamp(),
+      fieldSources: activeRecord?.fieldSources
     };
-    await saveManualOverride(record);
-    updateResults(root, formatPersianTimestamp(new Date(record.updatedAt)));
+    try {
+      await saveManualOverride(record);
+      activeRecord = record;
+      updateResults(root, formatPersianTimestamp(new Date(record.updatedAt)));
+      setApplyStatus(root, 'ورودی‌های دستی ذخیره شد.');
+    } catch (error) {
+      setApplyStatus(
+        root,
+        `ذخیره ورودی‌های دستی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+        true
+      );
+    }
   });
 
   (options.mount ?? document.body).appendChild(root);

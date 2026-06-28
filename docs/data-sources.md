@@ -65,6 +65,16 @@ It may suggest these candidate values when labels and tables are clear enough:
 
 These values are suggestions only. The widget can copy supported suggestions into manual fields only after the user clicks an explicit apply action. No parsed value is applied automatically, and no parsed value is used for NAV calculation unless the user manually accepts or edits it.
 
+When a suggestion is applied, the saved manual override records source metadata for that field:
+
+- source: `codal-suggestion`
+- applied timestamp
+- source report title/date
+- confidence level
+- applied value
+
+If the user later edits that field manually, the field source is marked back to `manual`.
+
 The parser supports Persian and Arabic digit normalization, comma-separated numbers, and common Persian labels such as `بهای تمام شده`, `ارزش بازار`, `ارزش روز`, `پذیرفته شده در بورس`, `خارج از بورس`, `پرتفوی بورسی`, and `پرتفوی غیر بورسی`.
 
 Detail fetch states are explicit:
