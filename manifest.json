@@ -1,42 +1,55 @@
-{
-  "manifest_version": 3,
-  "name": "Iran Bourse NAV Estimator",
-  "short_name": "Bourse NAV",
-  "version": "0.1.0",
-  "description": "Local-first semi-manual NAV and P/NAV estimator for Iranian investment and holding companies on TSETMC.",
-  "default_locale": "fa",
-  "action": {
-    "default_title": "محاسبه NAV",
-    "default_popup": "src/popup/popup.html"
-  },
-  "background": {
-    "service_worker": "background/service-worker.js",
-    "type": "module"
-  },
-  "content_scripts": [
-    {
-      "matches": ["https://www.tsetmc.com/*", "https://tsetmc.com/*"],
-      "js": ["content/tsetmc-content.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["https://www.codal.ir/*", "https://codal.ir/*"],
-      "js": ["content/codal-content.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  "permissions": ["storage", "activeTab", "tabs"],
-  "host_permissions": [
-    "https://www.tsetmc.com/*",
-    "https://tsetmc.com/*",
-    "https://cdn.tsetmc.com/*",
-    "https://www.codal.ir/*",
-    "https://codal.ir/*",
-    "https://search.codal.ir/*"
-  ],
-  "icons": {
-    "16": "icons/icon.svg",
-    "48": "icons/icon.svg",
-    "128": "icons/icon.svg"
-  }
+﻿{
+    "manifest_version":  3,
+    "name":  "Iran Bourse NAV Estimator",
+    "short_name":  "Bourse NAV",
+    "version":  "0.1.0",
+    "description":  "Local-first semi-manual NAV and P/NAV estimator for Iranian investment and holding companies on TSETMC.",
+    "action":  {
+                   "default_title":  "Ù…Ø­Ø§Ø³Ø¨Ù‡ NAV",
+                   "default_popup":  "src/popup/popup.html"
+               },
+    "background":  {
+                       "service_worker":  "background/service-worker.js",
+                       "type":  "module"
+                   },
+    "content_scripts":  [
+                            {
+                                "matches":  [
+                                                "https://www.tsetmc.com/*",
+                                                "https://tsetmc.com/*"
+                                            ],
+                                "js":  [
+                                           "content/tsetmc-content.js"
+                                       ],
+                                "run_at":  "document_idle"
+                            },
+                            {
+                                "matches":  [
+                                                "https://www.codal.ir/*",
+                                                "https://codal.ir/*"
+                                            ],
+                                "js":  [
+                                           "content/codal-content.js"
+                                       ],
+                                "run_at":  "document_idle"
+                            }
+                        ],
+    "permissions":  [
+                        "storage",
+                        "activeTab",
+                        "tabs"
+                    ],
+    "host_permissions":  [
+                             "https://www.tsetmc.com/*",
+                             "https://tsetmc.com/*",
+                             "https://cdn.tsetmc.com/*",
+                             "https://www.codal.ir/*",
+                             "https://codal.ir/*",
+                             "https://search.codal.ir/*"
+                         ],
+    "icons":  {
+                  "16":  "icons/icon.svg",
+                  "48":  "icons/icon.svg",
+                  "128":  "icons/icon.svg"
+              }
 }
