@@ -1,0 +1,39 @@
+{
+  "name": "iran-bourse-nav-extension",
+  "version": "0.1.0",
+  "description": "Local-first Chrome extension for estimating NAV and P/NAV of Iranian listed investment and holding companies.",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "tsc --noEmit && vite build --configLoader runner",
+    "test": "vitest run --configLoader runner",
+    "test:watch": "vitest --configLoader runner",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "check": "npm run lint && npm run test && npm run build"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "iran",
+    "tsetmc",
+    "nav",
+    "pnav",
+    "bourse"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.2.0",
+    "@types/node": "^24.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.62.0",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9"
+  }
+}

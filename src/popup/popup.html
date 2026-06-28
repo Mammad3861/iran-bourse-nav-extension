@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>محاسبه NAV</title>
+  </head>
+  <body class="ibnav-root ibnav-popup">
+    <main id="popup-root">
+      <header class="ibnav-header">
+        <div>
+          <h1 class="ibnav-title">خلاصه NAV</h1>
+          <div class="ibnav-symbol" data-popup-symbol>-</div>
+        </div>
+      </header>
+      <section class="ibnav-body">
+        <div class="ibnav-results">
+          <div class="ibnav-row"><span>NAV کل</span><strong data-popup-result="navTotal">-</strong></div>
+          <div class="ibnav-row"><span>NAV هر سهم</span><strong data-popup-result="navPerShare">-</strong></div>
+          <div class="ibnav-row"><span>P/NAV</span><strong data-popup-result="pToNav">-</strong></div>
+          <div class="ibnav-row"><span>آخرین ذخیره</span><span data-popup-result="updatedAt">-</span></div>
+        </div>
+        <p class="ibnav-empty" data-popup-empty hidden>برای این نماد هنوز داده‌ای ذخیره نشده است.</p>
+        <p class="ibnav-warning">این خروجی فقط یک برآورد محلی است و توصیه سرمایه‌گذاری محسوب نمی‌شود.</p>
+      </section>
+    </main>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

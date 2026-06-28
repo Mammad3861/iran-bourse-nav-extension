@@ -1,0 +1,284 @@
+export type CodalReportKind = 'monthly-activity' | 'financial-statement' | 'unknown';
+
+export interface CodalReportReference {
+  symbol: string;
+  title: string;
+  companyName?: string;
+  publishedAt?: string;
+  tracingNo?: string;
+  letterCode?: string;
+  url?: string;
+  raw?: unknown;
+}
+
+export interface CodalSearchOptions {
+  limit?: number;
+  timeoutMs?: number;
+  retryLimit?: number;
+  cacheTtlMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+interface CodalCacheRecord {
+  createdAt: string;
+  reports: CodalReportReference[];
+}
+
+const CODAL_SEARCH_ENDPOINT = 'https://search.codal.ir/api/search/v2/q';
+const CODAL_ORIGIN = 'https://www.codal.ir';
+const DEFAULT_LIMIT = 20;
+const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_RETRY_LIMIT = 2;
+const DEFAULT_CACHE_TTL_MS = 15 * 60 * 1_000;
+
+const monthlyActivityPatterns = [/فعالیت\s*ماهانه/, /گزارش\s*فعالیت/];
+const financialStatementPatterns = [/صورت\s*های\s*مالی/, /صورت‌های\s*مالی/, /صورت\s*مالی/];
+
+function hasChromeStorage(): boolean {
+  return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local);
+}
+
+function codalCacheKey(symbol: string, kind: CodalReportKind | 'all'): string {
+  return `codal-search:${kind}:${symbol}`;
+}
+
+async function getCachedReports(
+  symbol: string,
+  kind: CodalReportKind | 'all',
+  cacheTtlMs: number
+): Promise<CodalReportReference[] | undefined> {
+  const key = codalCacheKey(symbol, kind);
+  const record = hasChromeStorage()
+    ? ((await chrome.storage.local.get(key))[key] as CodalCacheRecord | undefined)
+    : undefined;
+
+  if (!record) {
+    return undefined;
+  }
+
+  const ageMs = Date.now() - Date.parse(record.createdAt);
+  return ageMs >= 0 && ageMs <= cacheTtlMs ? record.reports : undefined;
+}
+
+async function setCachedReports(
+  symbol: string,
+  kind: CodalReportKind | 'all',
+  reports: CodalReportReference[]
+): Promise<void> {
+  if (!hasChromeStorage()) {
+    return;
+  }
+
+  await chrome.storage.local.set({
+    [codalCacheKey(symbol, kind)]: {
+      createdAt: new Date().toISOString(),
+      reports
+    } satisfies CodalCacheRecord
+  });
+}
+
+function buildSearchUrl(symbol: string, limit: number): string {
+  const url = new URL(CODAL_SEARCH_ENDPOINT);
+  url.searchParams.set('search', 'true');
+  url.searchParams.set('Symbol', symbol);
+  url.searchParams.set('PageNumber', '1');
+  url.searchParams.set('Length', String(limit));
+  url.searchParams.set('LetterType', '-1');
+  url.searchParams.set('Category', '-1');
+  url.searchParams.set('CompanyType', '-1');
+  return url.toString();
+}
+
+function absoluteCodalUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) {
+    return undefined;
+  }
+
+  try {
+    return new URL(value, CODAL_ORIGIN).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function getString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeReport(raw: unknown, fallbackSymbol: string): CodalReportReference | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const title = getString(record, ['Title', 'title', 'LetterTitle', 'letterTitle']);
+  if (!title) {
+    return undefined;
+  }
+
+  return {
+    symbol: getString(record, ['Symbol', 'symbol']) ?? fallbackSymbol,
+    title,
+    companyName: getString(record, ['CompanyName', 'companyName', 'Name', 'name']),
+    publishedAt: getString(record, ['PublishDateTime', 'publishDateTime', 'PublishDate', 'SentDateTime']),
+    tracingNo: getString(record, ['TracingNo', 'tracingNo']),
+    letterCode: getString(record, ['LetterCode', 'letterCode']),
+    url: absoluteCodalUrl(getString(record, ['Url', 'url', 'ReportUrl', 'reportUrl', 'Link', 'link'])),
+    raw
+  };
+}
+
+function extractReports(payload: unknown, symbol: string): CodalReportReference[] {
+  const candidates =
+    payload && typeof payload === 'object'
+      ? ((payload as Record<string, unknown>).Letters ??
+        (payload as Record<string, unknown>).letters ??
+        (payload as Record<string, unknown>).Data ??
+        (payload as Record<string, unknown>).data ??
+        payload)
+      : payload;
+
+  if (!Array.isArray(candidates)) {
+    return [];
+  }
+
+  return candidates
+    .map((item) => normalizeReport(item, symbol))
+    .filter((item): item is CodalReportReference => Boolean(item));
+}
+
+async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs: number,
+  fetchImpl: typeof fetch
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetchImpl(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Codal search request failed with HTTP ${response.status}.`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Codal search request timed out after ${timeoutMs} ms.`, { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: Required<Pick<CodalSearchOptions, 'timeoutMs' | 'retryLimit' | 'fetchImpl'>>
+): Promise<unknown> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= options.retryLimit; attempt += 1) {
+    try {
+      return await fetchJsonWithTimeout(url, options.timeoutMs, options.fetchImpl);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : 'Unknown Codal search error.';
+  throw new Error(`Codal search failed after ${options.retryLimit + 1} attempt(s): ${message}`, {
+    cause: lastError
+  });
+}
+
+function sortReportsNewestFirst(reports: CodalReportReference[]): CodalReportReference[] {
+  return [...reports].sort((a, b) => {
+    const left = a.publishedAt ? Date.parse(a.publishedAt) : 0;
+    const right = b.publishedAt ? Date.parse(b.publishedAt) : 0;
+    return right - left;
+  });
+}
+
+function titleMatches(title: string, patterns: RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(title));
+}
+
+async function getReportsByKind(
+  symbol: string,
+  kind: CodalReportKind,
+  patterns: RegExp[],
+  options: CodalSearchOptions = {}
+): Promise<CodalReportReference | undefined> {
+  const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  const cached = await getCachedReports(symbol, kind, cacheTtlMs);
+  if (cached) {
+    return cached[0];
+  }
+
+  const reports = await searchReportsBySymbol(symbol, options);
+  const matching = sortReportsNewestFirst(reports.filter((report) => titleMatches(report.title, patterns)));
+  await setCachedReports(symbol, kind, matching);
+  return matching[0];
+}
+
+export async function searchReportsBySymbol(
+  symbol: string,
+  options: CodalSearchOptions = {}
+): Promise<CodalReportReference[]> {
+  const normalizedSymbol = symbol.trim();
+  if (!normalizedSymbol) {
+    throw new Error('Codal search requires a non-empty symbol.');
+  }
+
+  const limit = options.limit ?? DEFAULT_LIMIT;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const retryLimit = options.retryLimit ?? DEFAULT_RETRY_LIMIT;
+  const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  const cached = await getCachedReports(normalizedSymbol, 'all', cacheTtlMs);
+  if (cached) {
+    return cached;
+  }
+
+  const payload = await fetchWithRetry(buildSearchUrl(normalizedSymbol, limit), {
+    timeoutMs,
+    retryLimit,
+    fetchImpl
+  });
+  const reports = sortReportsNewestFirst(extractReports(payload, normalizedSymbol));
+  await setCachedReports(normalizedSymbol, 'all', reports);
+  return reports;
+}
+
+export async function getLatestMonthlyActivityReport(
+  symbol: string,
+  options?: CodalSearchOptions
+): Promise<CodalReportReference | undefined> {
+  return getReportsByKind(symbol, 'monthly-activity', monthlyActivityPatterns, options);
+}
+
+export async function getLatestFinancialStatement(
+  symbol: string,
+  options?: CodalSearchOptions
+): Promise<CodalReportReference | undefined> {
+  return getReportsByKind(symbol, 'financial-statement', financialStatementPatterns, options);
+}

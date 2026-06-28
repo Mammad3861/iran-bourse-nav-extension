@@ -1,0 +1,161 @@
+.ibnav-root {
+  direction: rtl;
+  font-family:
+    Vazirmatn,
+    IRANSans,
+    Tahoma,
+    Arial,
+    sans-serif;
+  color: #17201f;
+  box-sizing: border-box;
+}
+
+.ibnav-widget {
+  position: fixed;
+  inset-block-start: 88px;
+  inset-inline-start: 16px;
+  z-index: 2147483647;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  background: #f8faf9;
+  border: 1px solid #d7dfdc;
+  border-radius: 8px;
+  box-shadow: 0 14px 40px rgb(15 23 42 / 18%);
+}
+
+.ibnav-popup {
+  min-width: 360px;
+  max-width: 420px;
+  padding: 14px;
+  background: #f8faf9;
+}
+
+.ibnav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #d7dfdc;
+  background: #eef6f3;
+}
+
+.ibnav-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ibnav-symbol {
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ibnav-collapse,
+.ibnav-save {
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  background: #0f766e;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.ibnav-collapse {
+  min-width: 32px;
+  padding: 4px 8px;
+}
+
+.ibnav-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.ibnav-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.ibnav-field {
+  display: grid;
+  gap: 5px;
+}
+
+.ibnav-label {
+  color: #3d4a47;
+  font-size: 12px;
+}
+
+.ibnav-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5d1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17201f;
+  font-size: 14px;
+  min-height: 34px;
+  padding: 6px 9px;
+}
+
+.ibnav-input:focus {
+  border-color: #0f766e;
+  outline: 2px solid rgb(15 118 110 / 20%);
+}
+
+.ibnav-results {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid #d7dfdc;
+  padding-top: 12px;
+}
+
+.ibnav-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.ibnav-row strong {
+  color: #0f766e;
+  font-size: 14px;
+}
+
+.ibnav-muted {
+  color: #66736f;
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.ibnav-warning {
+  border-radius: 6px;
+  background: #fff8e1;
+  color: #604500;
+  font-size: 11px;
+  line-height: 1.8;
+  padding: 8px 10px;
+}
+
+.ibnav-empty {
+  color: #66736f;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.ibnav-widget.ibnav-collapsed .ibnav-body {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .ibnav-widget {
+    inset-inline: 10px;
+    inset-block-start: 70px;
+    width: auto;
+  }
+}

@@ -1,0 +1,194 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  getInstrumentInfoByInsCode,
+  getLatestPriceByInsCode,
+  searchSymbols
+} from '../data/tsetmc-client';
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: vi.fn().mockResolvedValue(payload)
+  } as unknown as Response;
+}
+
+function createChromeStorageMock(initial: Record<string, unknown> = {}) {
+  const store = { ...initial };
+  return {
+    store,
+    chrome: {
+      storage: {
+        local: {
+          get: vi.fn(async (key: string) => ({ [key]: store[key] })),
+          set: vi.fn(async (items: Record<string, unknown>) => {
+            Object.assign(store, items);
+          })
+        }
+      }
+    }
+  };
+}
+
+describe('tsetmc-client', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('searches symbols and normalizes instrument search results', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        instrumentSearch: [
+          {
+            insCode: '123456789',
+            lVal18AFC: 'TEST1',
+            lVal30: 'Test Company One',
+            cIsin: 'IRO1TEST0001',
+            marketName: 'TSE'
+          }
+        ]
+      })
+    );
+
+    const results = await searchSymbols('TEST', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/TEST'
+    );
+    expect(results).toEqual([
+      expect.objectContaining({
+        insCode: '123456789',
+        symbol: 'TEST1',
+        name: 'Test Company One',
+        isin: 'IRO1TEST0001',
+        market: 'TSE'
+      })
+    ]);
+    expect(storage.chrome.storage.local.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns cached symbol search results without calling fetch', async () => {
+    const storage = createChromeStorageMock({
+      'tsetmc:search:ABC': {
+        createdAt: new Date().toISOString(),
+        value: [{ insCode: '1', symbol: 'ABC' }]
+      }
+    });
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn();
+
+    const results = await searchSymbols('ABC', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(results[0]).toEqual({ insCode: '1', symbol: 'ABC' });
+  });
+
+  it('fetches instrument identity by InsCode', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        instrumentInfo: {
+          insCode: '123',
+          lVal18AFC: 'ABC',
+          lVal30: 'ABC Holding',
+          cIsin: 'IRO1ABC0001',
+          sectorName: 'Investments',
+          zTitad: 5000000
+        }
+      })
+    );
+
+    const info = await getInstrumentInfoByInsCode('123', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://cdn.tsetmc.com/api/Instrument/GetInstrumentInfo/123');
+    expect(info).toEqual(
+      expect.objectContaining({
+        insCode: '123',
+        symbol: 'ABC',
+        name: 'ABC Holding',
+        totalShares: 5000000
+      })
+    );
+  });
+
+  it('fetches latest last trade and closing prices by InsCode', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        closingPriceInfo: {
+          insCode: '123',
+          pDrCotVal: 1450,
+          pClosing: 1430,
+          priceYesterday: 1400,
+          dEven: '20260628'
+        }
+      })
+    );
+
+    const price = await getLatestPriceByInsCode('123', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/123'
+    );
+    expect(price).toEqual(
+      expect.objectContaining({
+        insCode: '123',
+        lastTradePrice: 1450,
+        closingPrice: 1430,
+        source: 'api'
+      })
+    );
+  });
+
+  it('falls back to DOM price extraction when latest price fetch fails', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: 'unavailable' }, 503));
+    const documentMock = {
+      querySelector: vi.fn((selector: string) =>
+        selector === '[data-current-price]' ? { textContent: '1,250' } : null
+      ),
+      querySelectorAll: vi.fn(() => [])
+    } as unknown as Document;
+
+    const price = await getLatestPriceByInsCode('123', {
+      retryLimit: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      fallbackDocument: documentMock
+    });
+
+    expect(price).toEqual({
+      insCode: '123',
+      lastTradePrice: 1250,
+      source: 'dom'
+    });
+  });
+
+  it('throws a clear error after retry exhaustion', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: 'temporary' }, 503));
+
+    await expect(
+      getInstrumentInfoByInsCode('123', {
+        retryLimit: 1,
+        fetchImpl: fetchMock as unknown as typeof fetch
+      })
+    ).rejects.toThrow('TSETMC request failed after 2 attempt(s): TSETMC request failed with HTTP 503.');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
