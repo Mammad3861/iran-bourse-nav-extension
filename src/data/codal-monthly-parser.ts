@@ -1,5 +1,6 @@
 import { normalizePersianArabicDigits, parseLocalizedNumber } from '../core/number-utils';
 import {
+  type CodalExtractedTable,
   type CodalReportDetail,
   isMonthlyActivityReport,
   stripUnsafeHtml
@@ -166,6 +167,21 @@ function tablesFromJson(rawJson: unknown): ParsedTable[] {
     .filter((table): table is ParsedTable => Boolean(table));
 }
 
+function tablesFromExtractedTables(tables: CodalExtractedTable[] | undefined): ParsedTable[] {
+  return (tables ?? [])
+    .map((table): ParsedTable => {
+      const rows = table.rows.length > 0 ? table.rows : [table.headers];
+      return {
+        index: table.index,
+        caption: table.caption,
+        rows: rows
+          .map((row) => row.map((cell) => normalizeText(String(cell))).filter(Boolean))
+          .filter((row) => row.length > 0)
+      };
+    })
+    .filter((table) => table.rows.length > 0);
+}
+
 function tableText(table: ParsedTable): string {
   return normalizeText(`${table.caption ?? ''} ${table.rows.flat().join(' ')}`);
 }
@@ -305,8 +321,9 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   }
 
   const tables = [
-    ...(detail.rawHtml ? tablesFromHtml(detail.rawHtml) : []),
-    ...(detail.rawJson ? tablesFromJson(detail.rawJson) : [])
+    ...tablesFromExtractedTables(detail.extractedTables),
+    ...(detail.extractedTables?.length ? [] : detail.rawHtml ? tablesFromHtml(detail.rawHtml) : []),
+    ...(detail.extractedTables?.length ? [] : detail.rawJson ? tablesFromJson(detail.rawJson) : [])
   ];
 
   if (tables.length === 0) {

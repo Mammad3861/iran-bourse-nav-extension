@@ -74,6 +74,15 @@ const tsetmcSymbolPatterns = [
   /نماد\s*[:：]?\s*([\u0600-\u06ffA-Za-z0-9_-]{2,20})/
 ];
 
+function isTsetmcSiteLabel(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return normalized === 'TSETMC' || normalized === 'INSTINFO' || normalized.includes('TSETMC');
+}
+
 export function detectInsCodeFromUrl(href: string): string | undefined {
   try {
     const parsed = new URL(href);
@@ -411,7 +420,12 @@ export async function getLatestPriceByInsCode(
 export function detectCurrentTsetmcSymbol(documentRef: Document, href: string): SymbolDetectionResult {
   const insCode = detectInsCodeFromUrl(href);
   const fromUrl = detectSymbolFromUrl(href);
-  if (fromUrl.symbol && fromUrl.symbol !== 'instInfo' && fromUrl.symbol !== insCode) {
+  if (
+    fromUrl.symbol &&
+    fromUrl.symbol !== 'instInfo' &&
+    fromUrl.symbol !== insCode &&
+    !isTsetmcSiteLabel(fromUrl.symbol)
+  ) {
     return fromUrl;
   }
 
@@ -439,7 +453,9 @@ export function detectCurrentTsetmcSymbol(documentRef: Document, href: string): 
   }
 
   const fromDocument = detectSymbolFromDocument(documentRef);
-  return fromDocument.symbol === 'instInfo' ? { source: 'unknown' } : fromDocument;
+  return fromDocument.symbol === 'instInfo' || isTsetmcSiteLabel(fromDocument.symbol)
+    ? { source: 'unknown' }
+    : fromDocument;
 }
 
 function parseFirstNumberAfterLabel(text: string, label: string): number | undefined {

@@ -5,8 +5,8 @@
     "version":  "0.1.0",
     "description":  "Local-first semi-manual NAV and P/NAV estimator for Iranian investment and holding companies on TSETMC.",
     "action":  {
-                   "default_title":  "Ù…Ø­Ø§Ø³Ø¨Ù‡ NAV",
-                   "default_popup":  "src/popup/popup.html"
+                   "default_title":  "محاسبه NAV",
+                   "default_popup":  "popup/popup.html"
                },
     "background":  {
                        "service_worker":  "background/service-worker.js",

@@ -7,7 +7,9 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite --configLoader runner",
-    "build": "tsc --noEmit && vite build --configLoader runner",
+    "build": "tsc --noEmit && node scripts/build.mjs && node scripts/validate-manifest.mjs",
+    "validate:manifest": "node scripts/validate-manifest.mjs",
+    "validate:content-scripts": "node scripts/validate-content-scripts.mjs",
     "test": "vitest run --configLoader runner",
     "test:watch": "vitest --configLoader runner",
     "lint": "eslint .",

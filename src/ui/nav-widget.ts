@@ -3,18 +3,18 @@ import { calculateNav, emptyNavInputs } from '../core/nav-calculator';
 import { formatNumberFa, formatPercentRatioFa, parseLocalizedNumber } from '../core/number-utils';
 import { formatPersianTimestamp, toIsoTimestamp } from '../core/persian-date-utils';
 import { getManualOverride, saveManualOverride } from '../data/cache-store';
-import {
-  discoverLatestCodalReports,
-  getReportDetail,
-  type CodalReportDetailResult,
-  type CodalReportDiscoveryResult,
-  type CodalReportReference
+import type {
+  CodalReportDetailResult,
+  CodalReportDiscoveryResult,
+  CodalReportReference
 } from '../data/codal-client';
 import {
   parseMonthlyActivityReport,
   type ExtractedPortfolioValue,
   type MonthlyActivityParseResult
 } from '../data/codal-monthly-parser';
+import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
+import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
 import {
   applyHighConfidenceSuggestionsToRecord,
@@ -124,11 +124,11 @@ function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryRes
   }
 
   if (result.status === 'found') {
-    status.textContent = 'گزارش‌های مرتبط پیدا شد';
+    status.textContent = 'ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد';
   } else if (result.status === 'not-found') {
-    status.textContent = 'گزارش مرتبطی برای این نماد پیدا نشد';
+    status.textContent = result.errorMessage ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد';
   } else {
-    status.textContent = `خطا در دریافت کدال: ${result.errorMessage ?? 'نامشخص'}`;
+    status.textContent = `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`;
   }
 
   monthly.textContent = reportSummary(result.monthlyActivityReport);
@@ -139,13 +139,15 @@ function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryRes
 
 function detailStatusText(result: CodalReportDetailResult): string {
   if (result.status === 'fetched') {
-    const tableText = result.detail?.tables.length
-      ? `${result.detail.tables.length} جدول شناسایی شد`
-      : 'جدولی شناسایی نشد';
-    return `جزئیات دریافت شد - ${tableText}`;
+    if (result.detail?.tables.length) {
+      return `جزئیات دریافت شد - تعداد جدول‌های شناسایی‌شده: ${result.detail.tables.length}`;
+    }
+    return result.errorMessage
+      ? `جزئیات دریافت شد، اما جدول قابل پشتیبانی شناسایی نشد: ${result.errorMessage}`
+      : 'جزئیات دریافت شد، اما جدول قابل پشتیبانی شناسایی نشد';
   }
   if (result.status === 'unsupported-format') {
-    return 'جزئیات دریافت شد، اما ساختار گزارش پشتیبانی نمی‌شود';
+    return result.errorMessage ?? 'ساختار این گزارش هنوز در Parser پشتیبانی نمی‌شود';
   }
   if (result.status === 'unavailable') {
     return 'جزئیات گزارش در دسترس نیست';
@@ -383,7 +385,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       <button type="button" class="ibnav-save">ذخیره برای این نماد</button>
       <section class="ibnav-codal" aria-live="polite">
         <h3 class="ibnav-subtitle">گزارش‌های کدال</h3>
-        <p class="ibnav-muted" data-ibnav-codal="status">در حال جستجوی گزارش‌ها...</p>
+        <p class="ibnav-muted" data-ibnav-codal="status">ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود</p>
         <div class="ibnav-row"><span>فعالیت ماهانه</span><span data-ibnav-codal="monthly">-</span></div>
         <a class="ibnav-link" data-ibnav-codal-link="monthly" target="_blank" rel="noreferrer" hidden>مشاهده گزارش فعالیت ماهانه</a>
         <div class="ibnav-row"><span>صورت مالی</span><span data-ibnav-codal="financial">-</span></div>
@@ -413,46 +415,59 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
 
   const updatedAt = activeRecord ? formatPersianTimestamp(new Date(activeRecord.updatedAt)) : formatPersianTimestamp();
   updateResults(root, updatedAt);
-  discoverLatestCodalReports(options.symbol)
-    .then(async (result) => {
-      renderCodalDiscovery(root, result);
-      const report = result.monthlyActivityReport ?? result.financialStatementReport;
-      if (!report) {
-        renderCodalDetail(root, {
-          status: result.status === 'failed' ? 'network-error' : 'unavailable',
-          errorMessage: result.errorMessage
-        });
-        return;
-      }
-      const detailResult = await getReportDetail(report);
-      renderCodalDetail(root, detailResult);
-      if (detailResult.detail) {
-        renderMonthlySuggestions(
-          root,
-          parseMonthlyActivityReport(detailResult.detail),
-          options,
-          () => activeRecord,
-          (record) => {
-            activeRecord = record;
-          }
-        );
-      }
-    })
-    .catch((error: unknown) =>
-      {
+  const codalSymbolValidation = validateCodalSearchSymbol(options.symbol);
+  if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
+    renderCodalDiscovery(root, {
+      status: 'not-found',
+      symbol: options.symbol,
+      errorMessage: codalSymbolValidation.reason,
+      sourceVerified: false,
+      checkedAt: new Date().toISOString()
+    });
+    renderCodalDetail(root, {
+      status: 'unavailable',
+      errorMessage: codalSymbolValidation.reason
+    });
+  } else {
+    requestCodalDiscovery(codalSymbolValidation.symbol)
+      .then(async (result) => {
+        renderCodalDiscovery(root, result);
+        const report = result.monthlyActivityReport ?? result.financialStatementReport;
+        if (!report) {
+          renderCodalDetail(root, {
+            status: result.status === 'failed' ? 'network-error' : 'unavailable',
+            errorMessage: result.errorMessage
+          });
+          return;
+        }
+        const detailResult = await requestCodalReportDetail(report);
+        renderCodalDetail(root, detailResult);
+        if (detailResult.detail) {
+          renderMonthlySuggestions(
+            root,
+            parseMonthlyActivityReport(detailResult.detail),
+            options,
+            () => activeRecord,
+            (record) => {
+              activeRecord = record;
+            }
+          );
+        }
+      })
+      .catch((error: unknown) => {
         renderCodalDiscovery(root, {
-        status: 'failed',
-        symbol: options.symbol,
-        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
-        sourceVerified: false,
-        checkedAt: new Date().toISOString()
-      });
+          status: 'failed',
+          symbol: options.symbol,
+          errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
+          sourceVerified: false,
+          checkedAt: new Date().toISOString()
+        });
         renderCodalDetail(root, {
           status: 'network-error',
           errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت جزئیات کدال'
         });
-      }
-    );
+      });
+  }
 
   root.querySelectorAll<HTMLInputElement>('.ibnav-input').forEach((input) => {
     input.addEventListener('input', () => {

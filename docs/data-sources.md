@@ -10,6 +10,8 @@ The extension is local-first and semi-manual:
 
 Manual NAV inputs are not transmitted to any external service. Optional Codal/TSETMC lookups may send the searched symbol or InsCode to those public hosts when a feature calls the data clients.
 
+Codal network requests are performed by the Manifest V3 background service worker through typed `chrome.runtime.sendMessage` requests. TSETMC content scripts do not fetch Codal directly, which avoids page-origin CORS failures from `https://www.tsetmc.com`.
+
 ## Future Candidates
 
 Future integrations may include:
@@ -36,6 +38,9 @@ Current safeguards:
 
 - Financial values parsed from Codal monthly/portfolio reports are suggestions only and are never applied automatically.
 - No single report URL is hardcoded.
+- Content scripts do not call Codal endpoints directly; they ask the background service worker to perform Codal discovery/detail requests.
+- Symbols are validated before Codal search. Empty values, `TSETMC`, `InsCode:*`, unknown labels, domains, URLs, numeric-only values, and English site labels are not searched.
+- In-flight background requests are reused per symbol/report to avoid duplicate page-load bursts.
 - Requests use a timeout and retry limit.
 - Successful responses are cached in `chrome.storage.local`.
 - Errors include the failed HTTP status, timeout, or retry exhaustion context.
@@ -49,12 +54,15 @@ The Codal client can fetch a discovered report detail page by URL, report id, or
 
 - Source URL.
 - Symbol, title, publish date, tracing number, and report id when available.
+- Detected content type: HTML, JSON, or unknown.
 - Raw HTML or raw JSON.
 - A short plain-text preview with Persian/Arabic digits normalized.
-- Detected table metadata such as table count, row count, column count, captions, and headers.
+- Detected table metadata such as table count, row count, column count, captions, headers, header previews, and the detection source.
+- Normalized extracted table rows when available.
+- Parser warnings when a response is empty, PDF-like, unsupported JSON, or has no supported table shape.
 - Fetch timestamp.
 
-The parser foundation is intentionally conservative. It strips scripts/styles before text extraction and detects table-like structures without relying on a single CSS selector. It does not extract financial values for NAV calculation.
+The parser foundation is intentionally conservative. It strips scripts/styles before text extraction and detects table-like structures without relying on a single CSS selector. Supported detail shapes include regular HTML `<table>` elements, limited repeated row/cell HTML structures, JSON table arrays, JSON cell arrays, and script-embedded JSON table data. Unsupported shapes are reported as safe warnings instead of guessed values.
 
 ## Limited Monthly Activity Parser
 

@@ -2,18 +2,18 @@ import { calculateNav } from '../core/nav-calculator';
 import { formatNumberFa, formatPercentRatioFa } from '../core/number-utils';
 import { formatPersianTimestamp } from '../core/persian-date-utils';
 import { getActiveSymbol, getManualOverride } from '../data/cache-store';
-import {
-  discoverLatestCodalReports,
-  getReportDetail,
-  type CodalReportDetailResult,
-  type CodalReportDiscoveryResult,
-  type CodalReportReference
+import type {
+  CodalReportDetailResult,
+  CodalReportDiscoveryResult,
+  CodalReportReference
 } from '../data/codal-client';
 import {
   parseMonthlyActivityReport,
   type ExtractedPortfolioValue,
   type MonthlyActivityParseResult
 } from '../data/codal-monthly-parser';
+import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
+import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
 import '../ui/styles.css';
 
 function setText(selector: string, value: string): void {
@@ -48,11 +48,11 @@ function updateReportLink(selector: string, report: CodalReportReference | undef
 
 function renderCodalDiscovery(result: CodalReportDiscoveryResult): void {
   if (result.status === 'found') {
-    setText('[data-popup-codal="status"]', 'گزارش‌های مرتبط پیدا شد');
+    setText('[data-popup-codal="status"]', 'ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد');
   } else if (result.status === 'not-found') {
-    setText('[data-popup-codal="status"]', 'گزارش مرتبطی برای این نماد پیدا نشد');
+    setText('[data-popup-codal="status"]', result.errorMessage ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد');
   } else {
-    setText('[data-popup-codal="status"]', `خطا در دریافت کدال: ${result.errorMessage ?? 'نامشخص'}`);
+    setText('[data-popup-codal="status"]', `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`);
   }
 
   setText('[data-popup-codal="monthly"]', reportSummary(result.monthlyActivityReport));
@@ -63,13 +63,15 @@ function renderCodalDiscovery(result: CodalReportDiscoveryResult): void {
 
 function detailStatusText(result: CodalReportDetailResult): string {
   if (result.status === 'fetched') {
-    const tableText = result.detail?.tables.length
-      ? `${result.detail.tables.length} جدول شناسایی شد`
-      : 'جدولی شناسایی نشد';
-    return `جزئیات دریافت شد - ${tableText}`;
+    if (result.detail?.tables.length) {
+      return `جزئیات دریافت شد - تعداد جدول‌های شناسایی‌شده: ${result.detail.tables.length}`;
+    }
+    return result.errorMessage
+      ? `جزئیات دریافت شد، اما جدول قابل پشتیبانی شناسایی نشد: ${result.errorMessage}`
+      : 'جزئیات دریافت شد، اما جدول قابل پشتیبانی شناسایی نشد';
   }
   if (result.status === 'unsupported-format') {
-    return 'جزئیات دریافت شد، اما ساختار گزارش پشتیبانی نمی‌شود';
+    return result.errorMessage ?? 'ساختار این گزارش هنوز در Parser پشتیبانی نمی‌شود';
   }
   if (result.status === 'unavailable') {
     return 'جزئیات گزارش در دسترس نیست';
@@ -156,7 +158,23 @@ async function renderPopup(): Promise<void> {
     setText('[data-popup-result="updatedAt"]', formatPersianTimestamp(new Date(record.updatedAt)));
   }
 
-  const codalResult = await discoverLatestCodalReports(symbol);
+  const codalSymbolValidation = validateCodalSearchSymbol(symbol);
+  if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
+    renderCodalDiscovery({
+      status: 'not-found',
+      symbol,
+      errorMessage: codalSymbolValidation.reason,
+      sourceVerified: false,
+      checkedAt: new Date().toISOString()
+    });
+    renderCodalDetail({
+      status: 'unavailable',
+      errorMessage: codalSymbolValidation.reason
+    });
+    return;
+  }
+
+  const codalResult = await requestCodalDiscovery(codalSymbolValidation.symbol);
   renderCodalDiscovery(codalResult);
   const report = codalResult.monthlyActivityReport ?? codalResult.financialStatementReport;
   if (!report) {
@@ -167,7 +185,7 @@ async function renderPopup(): Promise<void> {
     return;
   }
 
-  const detailResult = await getReportDetail(report);
+  const detailResult = await requestCodalReportDetail(report);
   renderCodalDetail(detailResult);
   if (detailResult.detail) {
     renderMonthlySuggestions(parseMonthlyActivityReport(detailResult.detail));

@@ -34,8 +34,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         'background/service-worker': resolve(projectRoot, 'src/background/service-worker.ts'),
-        'content/tsetmc-content': resolve(projectRoot, 'src/content/tsetmc-content.ts'),
-        'content/codal-content': resolve(projectRoot, 'src/content/codal-content.ts'),
         'popup/popup': resolve(projectRoot, 'src/popup/popup.html')
       },
       output: {

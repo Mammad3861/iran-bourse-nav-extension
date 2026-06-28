@@ -15,7 +15,7 @@ The first version is intentionally **semi-manual**. It injects a small Persian R
 * Per-symbol local storage
 * TSETMC page injection
 * Defensive TSETMC and Codal data-client boundaries
-* Codal report discovery and report-detail metadata foundation
+* Codal report discovery and defensive report-detail table detection
 * Limited Codal monthly activity parser for suggested portfolio values
 * Unit-tested NAV and parsing logic
 
@@ -63,7 +63,10 @@ Current MVP behavior:
 * User inputs are stored in `chrome.storage.local`.
 * The extension does not scrape aggressively.
 * Optional TSETMC/Codal lookups may send only the searched symbol, InsCode, or report URL/id to those public hosts.
+* Codal requests are routed through the MV3 background service worker, not directly from TSETMC content scripts.
+* Invalid detected symbols such as `TSETMC`, `InsCode:*`, unknown labels, URLs, domains, or numeric-only values are not searched in Codal.
 * Codal and TSETMC integrations should be treated as unstable until verified against live pages.
+* Codal detail parsing is best-effort and only produces reviewable suggestions; it never changes calculator inputs without an explicit user action.
 * Output is an estimate only and must be verified manually before any financial decision.
 
 ## Data Sources
@@ -89,6 +92,7 @@ Limited public smoke testing on 2026-06-28 verified that:
 * Public TSETMC `/instInfo/{InsCode}` pages for sample investment/holding symbols expose ticker/header and latest/closing price text that can be parsed defensively.
 * Public Codal search returns metadata for sample symbols, but may require Persian/Arabic ticker spelling variants.
 * Codal `Length` is treated as a period filter, not a page-size limit; the client keeps it at `-1`.
+* Codal detail pages may expose portfolio tables as HTML tables, embedded JSON, or script-held row/cell data. The client now reports detected content type, table count, header previews, and parser warnings when a shape is unsupported.
 * Chrome automation could not open `chrome://extensions/`, so final unpacked-extension loading from `dist/` must be checked manually in Chrome.
 
 ## Development
@@ -116,6 +120,8 @@ Build the extension:
 ```bash
 npm run build
 ```
+
+The build runs separate bundles for popup/background and content scripts. Content scripts are emitted as classic self-contained files under `dist/content/` because Manifest V3 `content_scripts[].js` files cannot depend on top-level ES module `import` statements. The build also validates `dist/manifest.json` so manifest paths must point to files that actually exist in `dist/`.
 
 ## Load in Chrome
 
@@ -179,6 +185,7 @@ public/icons/       Extension icons
 ### v0.6
 
 * Improve parser coverage with more real report fixtures
+* Improve Codal detail table detection for HTML, JSON, and script-embedded table data
 * Add unit/scale hints for suggested values
 * Add stronger review workflow before accepting parsed values
 

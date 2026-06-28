@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   discoverLatestCodalReports,
   extractTableMetadataFromHtml,
+  extractTablesFromHtml,
   getLatestFinancialStatement,
   getLatestMonthlyActivityReport,
   getReportDetail,
@@ -346,6 +347,8 @@ describe('codal-client', () => {
     expect(result.detail?.plainTextPreview).toContain('گزارش فعالیت ماهانه');
     expect(result.detail?.plainTextPreview).toContain('123');
     expect(result.detail?.plainTextPreview).not.toContain('alert');
+    expect(result.detail?.contentType).toBe('html');
+    expect(result.detail?.extractedTables[0].source).toBe('html-table');
     expect(result.detail?.tables[0]).toEqual(
       expect.objectContaining({
         rowCount: 2,
@@ -354,6 +357,48 @@ describe('codal-client', () => {
         caption: 'خلاصه'
       })
     );
+  });
+
+  it('detects real-like script-embedded JSON tables in Codal detail HTML', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const html = `
+      <html><body>
+        <h1>صورت وضعیت پورتفوی</h1>
+        <script>
+          window.reportData = {
+            sheets: [{
+              title: 'صورت وضعیت پورتفوی پذیرفته شده در بورس',
+              rows: [
+                ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+                ['سرمایه گذاری در سهام', '۱٬۲۳۴', '۲٬۳۴۵']
+              ]
+            }]
+          };
+        </script>
+      </body></html>
+    `;
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse(html, 'text/html'));
+
+    const result = await getReportDetailByUrl('https://www.codal.ir/Reports/Decision.aspx?LetterSerial=script', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('fetched');
+    expect(result.detail?.contentType).toBe('html');
+    expect(result.detail?.tables).toHaveLength(1);
+    expect(result.detail?.tables[0]).toEqual(
+      expect.objectContaining({
+        source: 'script-json',
+        headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+        headersPreview: ['شرح', 'بهای تمام شده', 'ارزش بازار']
+      })
+    );
+    expect(result.detail?.extractedTables[0].rows[1]).toEqual([
+      'سرمایه گذاری در سهام',
+      '1,234',
+      '2,345'
+    ]);
   });
 
   it('fetches report detail JSON and extracts table-like metadata', async () => {
@@ -378,14 +423,52 @@ describe('codal-client', () => {
 
     expect(result.status).toBe('fetched');
     expect(result.detail?.symbol).toBe('وغدیر');
+    expect(result.detail?.contentType).toBe('json');
     expect(result.detail?.rawJson).toEqual(payload);
     expect(result.detail?.plainTextPreview).toContain('10');
     expect(result.detail?.tables[0]).toEqual(
       expect.objectContaining({
-        rowCount: 1,
+        rowCount: 2,
         columnCount: 2,
         headers: ['دارایی', 'مبلغ'],
         caption: 'صورت وضعیت'
+      })
+    );
+  });
+
+  it('detects JSON cell-array table structures', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const payload = {
+      data: {
+        sheets: [
+          {
+            title: 'صورت وضعیت پورتفوی',
+            cells: [
+              { row: 0, column: 0, value: 'شرح' },
+              { row: 0, column: 1, value: 'بهای تمام شده' },
+              { row: 0, column: 2, value: 'ارزش روز' },
+              { row: 1, column: 0, value: 'سرمایه گذاری در سهام' },
+              { row: 1, column: 1, value: '۱۰۰' },
+              { row: 1, column: 2, value: '۱۸۰' }
+            ]
+          }
+        ]
+      }
+    };
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse(payload, 'application/json'));
+
+    const result = await getReportDetailByUrl('https://www.codal.ir/Reports/Decision.aspx?LetterSerial=cells', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('fetched');
+    expect(result.detail?.tables[0]).toEqual(
+      expect.objectContaining({
+        source: 'json',
+        rowCount: 2,
+        columnCount: 3,
+        headers: ['شرح', 'بهای تمام شده', 'ارزش روز']
       })
     );
   });
@@ -418,6 +501,19 @@ describe('codal-client', () => {
     expect(result.errorMessage).toContain('no readable content');
   });
 
+  it('returns a clear unsupported warning for PDF-like detail content', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse('%PDF-1.7', 'application/pdf'));
+
+    const result = await getReportDetailByUrl('https://www.codal.ir/Reports/Decision.aspx?LetterSerial=pdf', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('unsupported-format');
+    expect(result.detail?.parserWarnings[0]).toContain('PDF');
+  });
+
   it('returns timeout detail status when the detail fetch aborts', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);
@@ -440,6 +536,29 @@ describe('codal-client', () => {
     expect(tables).toHaveLength(2);
     expect(tables[0]).toEqual(expect.objectContaining({ rowCount: 1, columnCount: 2 }));
     expect(tables[1]).toEqual(expect.objectContaining({ rowCount: 2, headers: ['H1'] }));
+  });
+
+  it('extracts table objects from HTML scripts for parser reuse', () => {
+    const tables = extractTablesFromHtml(`
+      <script>
+        var codal = {
+          tables: [{
+            title: 'گزارش فعالیت ماهانه',
+            headers: ['شرح','بهای تمام شده'],
+            rows: [['سرمایه گذاری در سهام','۱۲۳']]
+          }]
+        };
+      </script>
+    `);
+
+    expect(tables).toHaveLength(1);
+    expect(tables[0]).toEqual(
+      expect.objectContaining({
+        source: 'script-json',
+        caption: 'گزارش فعالیت ماهانه',
+        headers: ['شرح', 'بهای تمام شده']
+      })
+    );
   });
 
   it('detects report types from titles', () => {

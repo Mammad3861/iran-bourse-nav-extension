@@ -9,11 +9,14 @@ This extension provides an estimate, not an audited valuation.
 - Corporate actions, capital increases, treasury shares, and post-report events are not automatically reconciled.
 - Codal and TSETMC APIs are treated as unstable or non-official until documented and legally safe to use.
 - No investment advice is provided.
-- Codal report discovery shows report metadata only; it does not parse tables or calculate NAV from Codal.
+- Codal report discovery and detail fetching are best-effort. The extension may detect table metadata and limited monthly portfolio suggestions, but it does not calculate NAV from Codal automatically.
 - Codal discovery may fail because of endpoint changes, browser/network blocking, rate limits, or unexpected response shapes.
+- Codal requests run through the extension background service worker. If the service worker is unavailable, asleep, or missing host permissions, the UI shows a safe warning and the manual calculator remains usable.
+- Invalid detected symbols such as `TSETMC`, `InsCode:*`, `نماد نامشخص`, URLs, domains, or numeric-only values are intentionally not searched in Codal.
 - A discovered Codal report link or title should be treated as a convenience reference, not a verified data source.
 - Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
-- Detected Codal tables are metadata only. Row and column counts do not imply the report format is supported for automatic extraction.
+- Detected Codal tables may come from HTML, JSON, or script-embedded data. Row and column counts or header previews do not imply the report format is fully supported for value extraction.
+- If a Codal detail page is PDF-like, empty, blocked, or shaped differently from supported table patterns, the UI should explain that no supported table was detected.
 - Unsupported Codal report formats are expected and should not block manual NAV calculations.
 - Codal monthly parser outputs are suggestions only and can be wrong when labels are ambiguous, report formats vary, units differ, numbers are malformed, or tables contain totals/subtotals in unexpected places.
 - The parser does not infer units, audit restatements, capital increases, or post-report adjustments.
@@ -47,5 +50,6 @@ Observed during limited public Codal smoke testing on 2026-06-28:
 - The endpoint rejected `Length=20` with HTTP 400 and described `Length` as a value from `-1` to `12`; this appears to be a period-length filter rather than a result count.
 - Search results can include subsidiary reports and annual board activity reports, so the extension must not treat every `گزارش فعالیت` title as a monthly activity report.
 - Codal detail pages can be large legacy HTML pages. Table extraction must remain defensive and failures must leave the manual NAV calculator usable.
+- Some Codal pages expose data inside script variables or JSON-like row/cell structures rather than visible HTML tables. The extension detects a limited set of these shapes, but unsupported structures should produce warnings instead of guesses.
 
 The MVP avoids aggressive scraping and does not run scheduled background collection.

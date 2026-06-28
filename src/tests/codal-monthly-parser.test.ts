@@ -7,8 +7,11 @@ function detail(overrides: Partial<CodalReportDetail>): CodalReportDetail {
     sourceUrl: 'https://www.codal.ir/Reports/Decision.aspx?LetterSerial=test',
     title: 'گزارش فعالیت ماهانه دوره ۱ ماهه منتهی به ۱۴۰۵/۰۳/۳۱',
     symbol: 'وغدیر',
+    contentType: 'html',
     plainTextPreview: '',
     tables: [],
+    extractedTables: [],
+    parserWarnings: [],
     fetchedAt: '2026-06-28T00:00:00.000Z',
     ...overrides
   };
@@ -142,6 +145,42 @@ describe('parseMonthlyActivityReport', () => {
       expect.arrayContaining([
         expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 300 }),
         expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 450 })
+      ])
+    );
+  });
+
+  it('parses normalized extracted tables from script-embedded Codal detail data', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        extractedTables: [
+          {
+            index: 0,
+            source: 'script-json',
+            caption: 'صورت وضعیت پورتفوی پذیرفته شده در بورس',
+            headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+            rows: [
+              ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+              ['سرمایه گذاری در سهام', '۱٬۵۰۰', '۲٬۷۰۰']
+            ]
+          }
+        ],
+        tables: [
+          {
+            index: 0,
+            rowCount: 2,
+            columnCount: 3,
+            headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+            source: 'script-json'
+          }
+        ]
+      })
+    );
+
+    expect(result.status).toBe('parsed');
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 1500 }),
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 2700 })
       ])
     );
   });

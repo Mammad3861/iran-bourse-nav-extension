@@ -222,6 +222,26 @@ describe('tsetmc-client', () => {
     ).toEqual({ symbol: 'وبملت', source: 'dom' });
   });
 
+  it('does not treat the TSETMC site title as a stock symbol', () => {
+    const title = {
+      textContent: '.:TSETMC:. :: مدیریت فناوری بورس تهران',
+      getAttribute: vi.fn(() => null)
+    };
+    const documentMock = {
+      querySelectorAll: vi.fn((selector: string) => {
+        if (selector.includes('title')) {
+          return [title];
+        }
+        return [];
+      }),
+      querySelector: vi.fn((selector: string) => (selector === 'title' ? title : null))
+    } as unknown as Document;
+
+    expect(detectCurrentTsetmcSymbol(documentMock, 'https://www.tsetmc.com/')).toEqual({
+      source: 'unknown'
+    });
+  });
+
   it('reads latest and closing prices from compact TSETMC table rows', () => {
     const rows = [
       { textContent: 'آخرین معامله1,255 (38) [2.94%-]' },

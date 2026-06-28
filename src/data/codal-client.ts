@@ -38,6 +38,16 @@ export interface CodalTableMetadata {
   columnCount: number;
   headers: string[];
   caption?: string;
+  source?: CodalExtractedTable['source'];
+  headersPreview?: string[];
+}
+
+export interface CodalExtractedTable {
+  index: number;
+  source: 'html-table' | 'html-row-structure' | 'script-json' | 'json';
+  caption?: string;
+  headers: string[];
+  rows: string[][];
 }
 
 export interface CodalReportDetail {
@@ -47,10 +57,13 @@ export interface CodalReportDetail {
   publishedAt?: string;
   tracingNo?: string;
   reportId?: string;
+  contentType: 'html' | 'json' | 'unknown';
   rawHtml?: string;
   rawJson?: unknown;
   plainTextPreview: string;
   tables: CodalTableMetadata[];
+  extractedTables: CodalExtractedTable[];
+  parserWarnings: string[];
   fetchedAt: string;
 }
 
@@ -377,6 +390,9 @@ function decodeHtmlEntities(value: string): string {
 
 function textFromHtml(html: string): string {
   return normalizePersianArabicDigits(decodeHtmlEntities(stripUnsafeHtml(html).replace(/<[^>]+>/g, ' ')))
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/\u200c/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -386,76 +402,405 @@ function tableCells(rowHtml: string, tagName: 'th' | 'td'): string[] {
   return Array.from(rowHtml.matchAll(pattern)).map((match) => textFromHtml(match[1]));
 }
 
-export function extractTableMetadataFromHtml(html: string): CodalTableMetadata[] {
+function normalizeCell(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return normalizePersianArabicDigits(String(value))
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/\u200c/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isPrimitiveCell(value: unknown): boolean {
+  return ['string', 'number', 'boolean'].includes(typeof value) || value === null;
+}
+
+function rowsFromHtmlTable(tableHtml: string): string[][] {
+  return Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi))
+    .map((row) => {
+      const headers = tableCells(row[1], 'th');
+      const cells = tableCells(row[1], 'td');
+      return headers.length > 0 ? headers : cells;
+    })
+    .filter((row) => row.some(Boolean));
+}
+
+function tableMetadataFromExtractedTables(tables: CodalExtractedTable[]): CodalTableMetadata[] {
+  return tables.map((table) => ({
+    index: table.index,
+    rowCount: table.rows.length,
+    columnCount: table.rows.reduce((max, row) => Math.max(max, row.length), table.headers.length),
+    headers: table.headers,
+    caption: table.caption,
+    source: table.source,
+    headersPreview: table.headers.slice(0, 6)
+  }));
+}
+
+function extractHtmlTableObjects(html: string): CodalExtractedTable[] {
   const safeHtml = stripUnsafeHtml(html);
   const tableMatches = Array.from(safeHtml.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi));
 
   return tableMatches.map((match, index) => {
     const tableHtml = match[1];
     const captionMatch = tableHtml.match(/<caption\b[^>]*>([\s\S]*?)<\/caption>/i);
-    const rowMatches = Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi));
-    const rows = rowMatches.map((row) => {
-      const headers = tableCells(row[1], 'th');
-      const cells = tableCells(row[1], 'td');
-      return headers.length > 0 ? headers : cells;
-    });
+    const rows = rowsFromHtmlTable(tableHtml);
     const headers = rows.find((row) => row.length > 0) ?? [];
-    const columnCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
 
     return {
       index,
-      rowCount: rows.length,
-      columnCount,
+      source: 'html-table',
       headers,
+      rows,
       caption: captionMatch ? textFromHtml(captionMatch[1]) : undefined
     };
   });
 }
 
-function extractJsonTables(payload: unknown): CodalTableMetadata[] {
+function extractRepeatedHtmlRowStructures(html: string, startIndex: number): CodalExtractedTable[] {
+  const safeHtml = stripUnsafeHtml(html);
+  const rowMatches = Array.from(
+    safeHtml.matchAll(/<(?:div|li|section)\b[^>]*(?:class|role)=["'][^"']*(?:row|tr|TableRow|rayanDynamicStatement)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|li|section)>/gi)
+  );
+  const rows = rowMatches
+    .map((match) => {
+      const cellMatches = Array.from(
+        match[1].matchAll(/<(?:span|div|label|p|td|th)\b[^>]*(?:class|role)=["'][^"']*(?:cell|td|th|column|value|caption)[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|div|label|p|td|th)>/gi)
+      );
+      const cells = cellMatches.map((cell) => textFromHtml(cell[1])).filter(Boolean);
+      return cells.length > 1 ? cells : [];
+    })
+    .filter((row) => row.length > 1);
+
+  if (rows.length < 2) {
+    return [];
+  }
+
+  return [
+    {
+      index: startIndex,
+      source: 'html-row-structure',
+      headers: rows[0],
+      rows
+    }
+  ];
+}
+
+function primitiveRowsFromArray(items: unknown[]): string[][] {
+  if (items.every(Array.isArray)) {
+    return items
+      .map((row) => (row as unknown[]).filter(isPrimitiveCell).map(normalizeCell))
+      .filter((row) => row.some(Boolean));
+  }
+
+  if (items.every((item) => item && typeof item === 'object' && !Array.isArray(item))) {
+    const keys = [
+      ...new Set(
+        items.flatMap((item) =>
+          Object.keys(item as Record<string, unknown>).filter(
+            (key) => isPrimitiveCell((item as Record<string, unknown>)[key])
+          )
+        )
+      )
+    ];
+
+    if (keys.length === 0) {
+      return [];
+    }
+
+    return [
+      keys.map(normalizeCell),
+      ...items.map((item) => keys.map((key) => normalizeCell((item as Record<string, unknown>)[key])))
+    ].filter((row) => row.some(Boolean));
+  }
+
+  return [];
+}
+
+function rowsFromCells(cells: unknown[]): string[][] {
+  const normalizedCells = cells
+    .map((cell) => (cell && typeof cell === 'object' ? (cell as Record<string, unknown>) : undefined))
+    .filter((cell): cell is Record<string, unknown> => Boolean(cell));
+  if (normalizedCells.length === 0) {
+    return [];
+  }
+
+  const rowKeys = ['row', 'Row', 'rowIndex', 'RowIndex', 'r', 'R'];
+  const colKeys = ['column', 'Column', 'columnIndex', 'ColumnIndex', 'col', 'Col', 'c', 'C'];
+  const valueKeys = ['value', 'Value', 'text', 'Text', 'title', 'Title', 'cellValue', 'CellValue'];
+  const rows = new Map<number, Map<number, string>>();
+
+  for (const cell of normalizedCells) {
+    const row = rowKeys.map((key) => cell[key]).find((value) => value !== undefined);
+    const column = colKeys.map((key) => cell[key]).find((value) => value !== undefined);
+    const value = valueKeys.map((key) => cell[key]).find((candidate) => candidate !== undefined);
+    const rowIndex = Number(row);
+    const columnIndex = Number(column);
+    if (!Number.isFinite(rowIndex) || !Number.isFinite(columnIndex)) {
+      continue;
+    }
+
+    const rowCells = rows.get(rowIndex) ?? new Map<number, string>();
+    rowCells.set(columnIndex, normalizeCell(value));
+    rows.set(rowIndex, rowCells);
+  }
+
+  return [...rows.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, row]) => {
+      const maxColumn = Math.max(...row.keys());
+      return Array.from({ length: maxColumn + 1 }, (_, index) => row.get(index) ?? '');
+    })
+    .filter((row) => row.some(Boolean));
+}
+
+function rowsFromTableRecord(record: Record<string, unknown>): string[][] {
+  const directRows = (Array.isArray(record.rows) ? record.rows : Array.isArray(record.Rows) ? record.Rows : undefined) as
+    | unknown[]
+    | undefined;
+  const headers = (Array.isArray(record.headers)
+    ? record.headers
+    : Array.isArray(record.Headers)
+      ? record.Headers
+      : Array.isArray(record.header)
+        ? record.header
+        : Array.isArray(record.Header)
+          ? record.Header
+          : []) as unknown[];
+
+  if (directRows) {
+    const rows = primitiveRowsFromArray(directRows);
+    return [headers.map(normalizeCell), ...rows].filter((row) => row.some(Boolean));
+  }
+
+  const cells = (Array.isArray(record.cells) ? record.cells : Array.isArray(record.Cells) ? record.Cells : undefined) as
+    | unknown[]
+    | undefined;
+  if (cells) {
+    return rowsFromCells(cells);
+  }
+
+  return [];
+}
+
+function tableCaptionFromRecord(record: Record<string, unknown>): string | undefined {
+  return getString(record, ['caption', 'Caption', 'title', 'Title', 'name', 'Name', 'sheetName', 'SheetName']);
+}
+
+function extractJsonTableObjects(payload: unknown, source: CodalExtractedTable['source'] = 'json'): CodalExtractedTable[] {
   if (!payload || typeof payload !== 'object') {
     return [];
   }
 
-  const record = payload as Record<string, unknown>;
-  const candidates = [record.tables, record.Tables, record.sheets, record.Sheets, record.data, record.Data]
-    .filter(Array.isArray)
-    .flat() as unknown[];
+  const tables: CodalExtractedTable[] = [];
+  const seen = new Set<unknown>();
 
-  return candidates
-    .map((table, index): CodalTableMetadata | undefined => {
-      if (!table || typeof table !== 'object') {
-        return undefined;
+  function visit(value: unknown, depth: number, caption?: string): void {
+    if (!value || typeof value !== 'object' || depth > 6 || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      const rows = primitiveRowsFromArray(value);
+      if (rows.length >= 2 && rows.reduce((max, row) => Math.max(max, row.length), 0) >= 2) {
+        tables.push({
+          index: tables.length,
+          source,
+          caption,
+          headers: rows[0],
+          rows
+        });
       }
-      const tableRecord = table as Record<string, unknown>;
-      const rows = Array.isArray(tableRecord.rows)
-        ? tableRecord.rows
-        : Array.isArray(tableRecord.Rows)
-          ? tableRecord.Rows
-          : [];
-      const headers = Array.isArray(tableRecord.headers)
-        ? tableRecord.headers.map(String)
-        : Array.isArray(tableRecord.Headers)
-          ? tableRecord.Headers.map(String)
-          : [];
-      const firstRow = Array.isArray(rows[0]) ? (rows[0] as unknown[]) : [];
-      const columnCount = Math.max(headers.length, firstRow.length);
 
-      return {
-        index,
-        rowCount: rows.length,
-        columnCount,
-        headers,
-        caption: getString(tableRecord, ['caption', 'Caption', 'title', 'Title'])
-      };
+      for (const item of value) {
+        visit(item, depth + 1, caption);
+      }
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    const tableCaption = tableCaptionFromRecord(record) ?? caption;
+    const rows = rowsFromTableRecord(record);
+    if (rows.length >= 2 && rows.reduce((max, row) => Math.max(max, row.length), 0) >= 2) {
+      tables.push({
+        index: tables.length,
+        source,
+        caption: tableCaption,
+        headers: rows[0],
+        rows
+      });
+    }
+
+    for (const key of ['tables', 'Tables', 'sheets', 'Sheets', 'data', 'Data', 'rows', 'Rows', 'cells', 'Cells']) {
+      if (key in record) {
+        visit(record[key], depth + 1, tableCaption);
+      }
+    }
+  }
+
+  visit(payload, 0);
+  return dedupeTables(tables);
+}
+
+function decodeScriptString(value: string): string {
+  return value.replace(/\\u([\dA-Fa-f]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
+
+function extractBalancedJsonCandidate(source: string, startIndex: number): string | undefined {
+  const opener = source[startIndex];
+  const closer = opener === '{' ? '}' : opener === '[' ? ']' : undefined;
+  if (!closer) {
+    return undefined;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let quote = '';
+  let escaped = false;
+  for (let index = startIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = true;
+      quote = char;
+    } else if (char === opener) {
+      depth += 1;
+    } else if (char === closer) {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function parseJsonCandidate(candidate: string): unknown | undefined {
+  const normalized = decodeScriptString(candidate.trim())
+    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+    .replace(/'/g, '"');
+
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractScriptJsonTables(html: string, startIndex: number): CodalExtractedTable[] {
+  const scripts = Array.from(html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)).map((match) =>
+    decodeHtmlEntities(match[1])
+  );
+  const tables: CodalExtractedTable[] = [];
+
+  for (const script of scripts) {
+    if (!/(table|sheet|cell|row|سرمایه|پرتفوی|پورتفوی|ارزش|بهای)/i.test(script)) {
+      continue;
+    }
+
+    const jsonParseMatches = Array.from(script.matchAll(/JSON\.parse\(\s*(['"])([\s\S]*?)\1\s*\)/gi));
+    for (const match of jsonParseMatches) {
+      const payload = parseJsonCandidate(decodeScriptString(match[2]));
+      tables.push(...extractJsonTableObjects(payload, 'script-json'));
+    }
+
+    for (let index = 0; index < script.length; index += 1) {
+      if (script[index] !== '{' && script[index] !== '[') {
+        continue;
+      }
+      const candidate = extractBalancedJsonCandidate(script, index);
+      if (!candidate || candidate.length < 20 || candidate.length > 250_000) {
+        continue;
+      }
+      const payload = parseJsonCandidate(candidate);
+      tables.push(...extractJsonTableObjects(payload, 'script-json'));
+      index += candidate.length - 1;
+    }
+  }
+
+  return dedupeTables(tables).map((table, offset) => ({ ...table, index: startIndex + offset }));
+}
+
+function dedupeTables(tables: CodalExtractedTable[]): CodalExtractedTable[] {
+  const seen = new Set<string>();
+  return tables
+    .filter((table) => table.rows.length > 0)
+    .filter((table) => {
+      const key = `${table.source}:${table.caption ?? ''}:${table.rows
+        .slice(0, 5)
+        .map((row) => row.join('|'))
+        .join('~')}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
     })
-    .filter((table): table is CodalTableMetadata => Boolean(table));
+    .map((table, index) => ({ ...table, index }));
+}
+
+export function extractTablesFromHtml(html: string): CodalExtractedTable[] {
+  const htmlTables = extractHtmlTableObjects(html);
+  const rowTables = extractRepeatedHtmlRowStructures(html, htmlTables.length);
+  const scriptTables = extractScriptJsonTables(html, htmlTables.length + rowTables.length);
+  return dedupeTables([...htmlTables, ...rowTables, ...scriptTables]);
+}
+
+export function extractTableMetadataFromHtml(html: string): CodalTableMetadata[] {
+  return tableMetadataFromExtractedTables(extractTablesFromHtml(html));
 }
 
 function jsonPreview(payload: unknown): string {
   return normalizePersianArabicDigits(JSON.stringify(payload))
     .replace(/\s+/g, ' ')
     .slice(0, 700);
+}
+
+function detectedContentType(contentType: string, body: string | unknown): CodalReportDetail['contentType'] {
+  if (contentType.includes('application/json') || typeof body !== 'string') {
+    return 'json';
+  }
+  if (contentType.includes('text/html') || /<html|<body|<table|<script/i.test(body)) {
+    return 'html';
+  }
+  return 'unknown';
+}
+
+function detailWarningsFor(
+  contentType: CodalReportDetail['contentType'],
+  body: string | unknown,
+  extractedTables: CodalExtractedTable[]
+): string[] {
+  if (extractedTables.length > 0) {
+    return [];
+  }
+
+  if (typeof body === 'string' && body.trim().startsWith('%PDF')) {
+    return ['گزارش شبیه PDF یا پیوست مستقیم است و Parser فعلی آن را پشتیبانی نمی‌کند.'];
+  }
+  if (contentType === 'html') {
+    return ['هیچ جدول HTML یا داده جدولی قابل پشتیبانی در اسکریپت‌های گزارش شناسایی نشد.'];
+  }
+  if (contentType === 'json') {
+    return ['ساختار JSON گزارش هنوز در Parser پشتیبانی نمی‌شود.'];
+  }
+  return ['نوع محتوای گزارش ناشناخته است یا پاسخ خالی/مسدود شده است.'];
 }
 
 export function isMonthlyActivityReport(title: string): boolean {
@@ -594,13 +939,17 @@ function normalizeDetailFromBody(
   report?: CodalReportReference
 ): CodalReportDetailResult {
   const fetchedAt = new Date().toISOString();
+  const normalizedContentType = detectedContentType(contentType, body);
 
   if (typeof body === 'string') {
     const plainTextPreview = textFromHtml(body).slice(0, 700);
-    const tables = extractTableMetadataFromHtml(body);
+    const extractedTables = extractTablesFromHtml(body);
+    const tables = tableMetadataFromExtractedTables(extractedTables);
+    const parserWarnings = detailWarningsFor(normalizedContentType, body, extractedTables);
+    const isAttachmentLike = body.trim().startsWith('%PDF') || contentType.includes('application/pdf');
 
     return {
-      status: plainTextPreview || tables.length > 0 ? 'fetched' : 'unsupported-format',
+      status: isAttachmentLike ? 'unsupported-format' : plainTextPreview || tables.length > 0 ? 'fetched' : 'unsupported-format',
       detail: {
         sourceUrl,
         symbol: report?.symbol,
@@ -608,17 +957,27 @@ function normalizeDetailFromBody(
         publishedAt: report?.publishedAt,
         tracingNo: report?.tracingNo,
         reportId: report?.reportId,
+        contentType: normalizedContentType,
         rawHtml: body,
         plainTextPreview,
         tables,
+        extractedTables,
+        parserWarnings,
         fetchedAt
       },
-      errorMessage: plainTextPreview || tables.length > 0 ? undefined : 'Report detail HTML had no readable content.'
+      errorMessage:
+        plainTextPreview || tables.length > 0
+          ? tables.length > 0
+            ? undefined
+            : parserWarnings[0]
+          : 'Report detail HTML had no readable content.'
     };
   }
 
-  const tables = extractJsonTables(body);
+  const extractedTables = extractJsonTableObjects(body, 'json');
+  const tables = tableMetadataFromExtractedTables(extractedTables);
   const plainTextPreview = jsonPreview(body);
+  const parserWarnings = detailWarningsFor(normalizedContentType, body, extractedTables);
 
   return {
     status:
@@ -629,14 +988,18 @@ function normalizeDetailFromBody(
       sourceUrl,
       symbol: report?.symbol,
       title: report?.title,
-      publishedAt: report?.publishedAt,
-      tracingNo: report?.tracingNo,
-      reportId: report?.reportId,
-      rawJson: body,
-      plainTextPreview,
-      tables,
-      fetchedAt
-    }
+        publishedAt: report?.publishedAt,
+        tracingNo: report?.tracingNo,
+        reportId: report?.reportId,
+        contentType: normalizedContentType,
+        rawJson: body,
+        plainTextPreview,
+        tables,
+        extractedTables,
+        parserWarnings,
+        fetchedAt
+    },
+    errorMessage: tables.length > 0 ? undefined : parserWarnings[0]
   };
 }
 

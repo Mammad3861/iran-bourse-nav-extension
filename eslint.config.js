@@ -9,6 +9,15 @@ export default [
   },
   eslint.configs.recommended,
   {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        URL: 'readonly',
+        console: 'readonly'
+      }
+    }
+  },
+  {
     files: ['**/*.ts'],
     languageOptions: {
       parser: tsParser,
