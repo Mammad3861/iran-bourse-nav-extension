@@ -1,4 +1,7 @@
+import { getLocalValue, setLocalValue } from './cache-store';
+
 export type CodalReportKind = 'monthly-activity' | 'financial-statement' | 'unknown';
+export type CodalDiscoveryStatus = 'found' | 'not-found' | 'failed';
 
 export interface CodalReportReference {
   symbol: string;
@@ -6,9 +9,20 @@ export interface CodalReportReference {
   companyName?: string;
   publishedAt?: string;
   tracingNo?: string;
+  reportId?: string;
   letterCode?: string;
   url?: string;
   raw?: unknown;
+}
+
+export interface CodalReportDiscoveryResult {
+  status: CodalDiscoveryStatus;
+  symbol: string;
+  monthlyActivityReport?: CodalReportReference;
+  financialStatementReport?: CodalReportReference;
+  errorMessage?: string;
+  sourceVerified: false;
+  checkedAt: string;
 }
 
 export interface CodalSearchOptions {
@@ -34,10 +48,6 @@ const DEFAULT_CACHE_TTL_MS = 15 * 60 * 1_000;
 const monthlyActivityPatterns = [/فعالیت\s*ماهانه/, /گزارش\s*فعالیت/];
 const financialStatementPatterns = [/صورت\s*های\s*مالی/, /صورت‌های\s*مالی/, /صورت\s*مالی/];
 
-function hasChromeStorage(): boolean {
-  return typeof chrome !== 'undefined' && Boolean(chrome.storage?.local);
-}
-
 function codalCacheKey(symbol: string, kind: CodalReportKind | 'all'): string {
   return `codal-search:${kind}:${symbol}`;
 }
@@ -48,9 +58,7 @@ async function getCachedReports(
   cacheTtlMs: number
 ): Promise<CodalReportReference[] | undefined> {
   const key = codalCacheKey(symbol, kind);
-  const record = hasChromeStorage()
-    ? ((await chrome.storage.local.get(key))[key] as CodalCacheRecord | undefined)
-    : undefined;
+  const record = await getLocalValue<CodalCacheRecord>(key);
 
   if (!record) {
     return undefined;
@@ -65,16 +73,10 @@ async function setCachedReports(
   kind: CodalReportKind | 'all',
   reports: CodalReportReference[]
 ): Promise<void> {
-  if (!hasChromeStorage()) {
-    return;
-  }
-
-  await chrome.storage.local.set({
-    [codalCacheKey(symbol, kind)]: {
+  await setLocalValue(codalCacheKey(symbol, kind), {
       createdAt: new Date().toISOString(),
       reports
-    } satisfies CodalCacheRecord
-  });
+    } satisfies CodalCacheRecord);
 }
 
 function buildSearchUrl(symbol: string, limit: number): string {
@@ -132,6 +134,7 @@ function normalizeReport(raw: unknown, fallbackSymbol: string): CodalReportRefer
     companyName: getString(record, ['CompanyName', 'companyName', 'Name', 'name']),
     publishedAt: getString(record, ['PublishDateTime', 'publishDateTime', 'PublishDate', 'SentDateTime']),
     tracingNo: getString(record, ['TracingNo', 'tracingNo']),
+    reportId: getString(record, ['LetterSerial', 'letterSerial', 'ReportId', 'reportId', 'Id', 'id']),
     letterCode: getString(record, ['LetterCode', 'letterCode']),
     url: absoluteCodalUrl(getString(record, ['Url', 'url', 'ReportUrl', 'reportUrl', 'Link', 'link'])),
     raw
@@ -221,6 +224,13 @@ function titleMatches(title: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(title));
 }
 
+function getLatestMatchingReport(
+  reports: CodalReportReference[],
+  patterns: RegExp[]
+): CodalReportReference | undefined {
+  return sortReportsNewestFirst(reports.filter((report) => titleMatches(report.title, patterns)))[0];
+}
+
 async function getReportsByKind(
   symbol: string,
   kind: CodalReportKind,
@@ -281,4 +291,44 @@ export async function getLatestFinancialStatement(
   options?: CodalSearchOptions
 ): Promise<CodalReportReference | undefined> {
   return getReportsByKind(symbol, 'financial-statement', financialStatementPatterns, options);
+}
+
+export async function discoverLatestCodalReports(
+  symbol: string,
+  options: CodalSearchOptions = {}
+): Promise<CodalReportDiscoveryResult> {
+  const normalizedSymbol = symbol.trim();
+  const checkedAt = new Date().toISOString();
+
+  if (!normalizedSymbol || normalizedSymbol === 'نماد نامشخص' || normalizedSymbol.startsWith('InsCode:')) {
+    return {
+      status: 'not-found',
+      symbol: normalizedSymbol,
+      sourceVerified: false,
+      checkedAt
+    };
+  }
+
+  try {
+    const reports = await searchReportsBySymbol(normalizedSymbol, options);
+    const monthlyActivityReport = getLatestMatchingReport(reports, monthlyActivityPatterns);
+    const financialStatementReport = getLatestMatchingReport(reports, financialStatementPatterns);
+
+    return {
+      status: monthlyActivityReport || financialStatementReport ? 'found' : 'not-found',
+      symbol: normalizedSymbol,
+      monthlyActivityReport,
+      financialStatementReport,
+      sourceVerified: false,
+      checkedAt
+    };
+  } catch (error) {
+    return {
+      status: 'failed',
+      symbol: normalizedSymbol,
+      errorMessage: error instanceof Error ? error.message : 'Codal discovery failed.',
+      sourceVerified: false,
+      checkedAt
+    };
+  }
 }

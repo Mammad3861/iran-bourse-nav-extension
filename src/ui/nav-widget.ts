@@ -3,6 +3,7 @@ import { calculateNav, emptyNavInputs } from '../core/nav-calculator';
 import { formatNumberFa, formatPercentRatioFa, parseLocalizedNumber } from '../core/number-utils';
 import { formatPersianTimestamp, toIsoTimestamp } from '../core/persian-date-utils';
 import { getManualOverride, saveManualOverride } from '../data/cache-store';
+import { discoverLatestCodalReports, type CodalReportDiscoveryResult, type CodalReportReference } from '../data/codal-client';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
 import styles from './styles.css?inline';
 
@@ -73,6 +74,52 @@ function updateResults(root: HTMLElement, updatedAt: string): void {
   root.querySelector('[data-ibnav-result="updatedAt"]')!.textContent = updatedAt;
 }
 
+function reportSummary(report: CodalReportReference | undefined): string {
+  if (!report) {
+    return 'یافت نشد';
+  }
+
+  return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
+}
+
+function updateReportLink(root: HTMLElement, selector: string, report: CodalReportReference | undefined): void {
+  const link = root.querySelector<HTMLAnchorElement>(selector);
+  if (!link) {
+    return;
+  }
+
+  if (report?.url) {
+    link.href = report.url;
+    link.hidden = false;
+  } else {
+    link.removeAttribute('href');
+    link.hidden = true;
+  }
+}
+
+function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryResult): void {
+  const status = root.querySelector('[data-ibnav-codal="status"]');
+  const monthly = root.querySelector('[data-ibnav-codal="monthly"]');
+  const financial = root.querySelector('[data-ibnav-codal="financial"]');
+
+  if (!status || !monthly || !financial) {
+    return;
+  }
+
+  if (result.status === 'found') {
+    status.textContent = 'گزارش‌های مرتبط پیدا شد';
+  } else if (result.status === 'not-found') {
+    status.textContent = 'گزارش مرتبطی برای این نماد پیدا نشد';
+  } else {
+    status.textContent = `خطا در دریافت کدال: ${result.errorMessage ?? 'نامشخص'}`;
+  }
+
+  monthly.textContent = reportSummary(result.monthlyActivityReport);
+  financial.textContent = reportSummary(result.financialStatementReport);
+  updateReportLink(root, '[data-ibnav-codal-link="monthly"]', result.monthlyActivityReport);
+  updateReportLink(root, '[data-ibnav-codal-link="financial"]', result.financialStatementReport);
+}
+
 export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLElement> {
   ensureStyle();
 
@@ -116,6 +163,15 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <div class="ibnav-row"><span>زمان داده</span><span data-ibnav-result="updatedAt">-</span></div>
       </div>
       <button type="button" class="ibnav-save">ذخیره برای این نماد</button>
+      <section class="ibnav-codal" aria-live="polite">
+        <h3 class="ibnav-subtitle">گزارش‌های کدال</h3>
+        <p class="ibnav-muted" data-ibnav-codal="status">در حال جستجوی گزارش‌ها...</p>
+        <div class="ibnav-row"><span>فعالیت ماهانه</span><span data-ibnav-codal="monthly">-</span></div>
+        <a class="ibnav-link" data-ibnav-codal-link="monthly" target="_blank" rel="noreferrer" hidden>مشاهده گزارش فعالیت ماهانه</a>
+        <div class="ibnav-row"><span>صورت مالی</span><span data-ibnav-codal="financial">-</span></div>
+        <a class="ibnav-link" data-ibnav-codal-link="financial" target="_blank" rel="noreferrer" hidden>مشاهده صورت مالی</a>
+        <p class="ibnav-warning">منبع کدال در این نسخه تأییدشده و پایدار فرض نمی‌شود؛ محاسبه NAV همچنان فقط از ورودی‌های دستی انجام می‌شود.</p>
+      </section>
       <p class="ibnav-muted">قیمت فعلی: ${
         options.currentPriceSource === 'page'
           ? 'خوانده‌شده از صفحه'
@@ -127,6 +183,17 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
 
   const updatedAt = saved ? formatPersianTimestamp(new Date(saved.updatedAt)) : formatPersianTimestamp();
   updateResults(root, updatedAt);
+  discoverLatestCodalReports(options.symbol)
+    .then((result) => renderCodalDiscovery(root, result))
+    .catch((error: unknown) =>
+      renderCodalDiscovery(root, {
+        status: 'failed',
+        symbol: options.symbol,
+        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
+        sourceVerified: false,
+        checkedAt: new Date().toISOString()
+      })
+    );
 
   root.querySelectorAll<HTMLInputElement>('.ibnav-input').forEach((input) => {
     input.addEventListener('input', () => updateResults(root, formatPersianTimestamp()));

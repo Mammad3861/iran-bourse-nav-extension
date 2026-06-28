@@ -115,6 +115,20 @@
   padding-top: 12px;
 }
 
+.ibnav-codal {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid #d7dfdc;
+  padding-top: 12px;
+}
+
+.ibnav-subtitle {
+  margin: 0;
+  color: #17201f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .ibnav-row {
   display: flex;
   justify-content: space-between;
@@ -131,6 +145,16 @@
   color: #66736f;
   font-size: 11px;
   line-height: 1.8;
+}
+
+.ibnav-link {
+  color: #0f766e;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.ibnav-link:hover {
+  text-decoration: underline;
 }
 
 .ibnav-warning {

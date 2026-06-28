@@ -33,6 +33,9 @@ Current safeguards:
 - Requests use a timeout and retry limit.
 - Successful responses are cached in `chrome.storage.local`.
 - Errors include the failed HTTP status, timeout, or retry exhaustion context.
+- UI result states are explicit: loading, found, not found, or failed.
+- The widget and popup show report metadata only: title, date, and link/id when available.
+- Manual NAV inputs remain the source of truth for all NAV calculations.
 
 If Codal publishes official API documentation, the client should be updated to follow that contract and this document should link to the official source.
 

@@ -9,6 +9,9 @@ This extension provides an estimate, not an audited valuation.
 - Corporate actions, capital increases, treasury shares, and post-report events are not automatically reconciled.
 - Codal and TSETMC APIs are treated as unstable or non-official until documented and legally safe to use.
 - No investment advice is provided.
+- Codal report discovery shows report metadata only; it does not parse tables or calculate NAV from Codal.
+- Codal discovery may fail because of endpoint changes, browser/network blocking, rate limits, or unexpected response shapes.
+- A discovered Codal report link or title should be treated as a convenience reference, not a verified data source.
 
 ## Real TSETMC Page Notes
 

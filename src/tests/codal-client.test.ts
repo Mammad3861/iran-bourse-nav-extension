@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  discoverLatestCodalReports,
   getLatestFinancialStatement,
   getLatestMonthlyActivityReport,
   searchReportsBySymbol
@@ -49,7 +50,8 @@ describe('codal-client', () => {
             Title: 'گزارش فعالیت ماهانه دوره ۱ ماهه',
             PublishDateTime: '2026-06-20T10:00:00',
             Url: '/Reports/Decision.aspx?LetterSerial=abc',
-            TracingNo: 123
+            TracingNo: 123,
+            LetterSerial: 'abc'
           }
         ]
       })
@@ -67,6 +69,7 @@ describe('codal-client', () => {
         title: 'گزارش فعالیت ماهانه دوره ۱ ماهه',
         companyName: 'سرمایه گذاری خوارزمی',
         tracingNo: '123',
+        reportId: 'abc',
         url: 'https://www.codal.ir/Reports/Decision.aspx?LetterSerial=abc'
       })
     ]);
@@ -156,5 +159,78 @@ describe('codal-client', () => {
 
     expect(monthly?.publishedAt).toBe('2026-06-22T09:00:00');
     expect(financial?.publishedAt).toBe('2026-06-18T09:00:00');
+  });
+
+  it('returns a found discovery result when relevant reports exist', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وغدیر',
+            Title: 'گزارش فعالیت ماهانه دوره ۱ ماهه',
+            PublishDateTime: '2026-06-22T09:00:00'
+          },
+          {
+            Symbol: 'وغدیر',
+            Title: 'صورت‌های مالی سال مالی منتهی',
+            PublishDateTime: '2026-06-18T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وغدیر', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('found');
+    expect(result.sourceVerified).toBe(false);
+    expect(result.monthlyActivityReport?.title).toContain('فعالیت ماهانه');
+    expect(result.financialStatementReport?.title).toContain('صورت‌های مالی');
+  });
+
+  it('returns not-found when Codal search succeeds but has no relevant reports', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ Letters: [{ Symbol: 'وغدیر', Title: 'اطلاعیه عمومی' }] }));
+
+    const result = await discoverLatestCodalReports('وغدیر', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('not-found');
+    expect(result.monthlyActivityReport).toBeUndefined();
+    expect(result.financialStatementReport).toBeUndefined();
+  });
+
+  it('returns failed when Codal discovery cannot fetch reports', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: 'unavailable' }, 503));
+
+    const result = await discoverLatestCodalReports('وغدیر', {
+      retryLimit: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.errorMessage).toContain('HTTP 503');
+  });
+
+  it('does not call Codal for unknown or InsCode-only symbols', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn();
+
+    const result = await discoverLatestCodalReports('InsCode:778253364357513', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('not-found');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
