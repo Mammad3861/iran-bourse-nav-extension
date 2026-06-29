@@ -44,6 +44,10 @@ export interface ParserTablePreview {
   index: number;
   caption?: string;
   detectedUnit?: string;
+  rawHeaders: string[];
+  normalizedHeaders: string[];
+  rawRows: string[][];
+  normalizedRows: string[][];
   headers: string[];
   rows: string[][];
   textPreview: string;
@@ -69,6 +73,8 @@ export interface ParserTableDiagnostics {
   detectedUnit?: string;
   rawHeaders: string[];
   normalizedHeaders: string[];
+  firstRawRows: string[][];
+  firstNormalizedRows: string[][];
   firstRows: string[][];
   detectedLabels: string[];
   totalRowCandidates: ParserTotalRowCandidate[];
@@ -117,6 +123,7 @@ export interface MonthlyActivityParseResult {
 interface ParsedTable {
   index: number;
   caption?: string;
+  rawRows: string[][];
   rows: string[][];
 }
 
@@ -203,6 +210,20 @@ function normalizeText(value: string): string {
     .trim();
 }
 
+function normalizeRow(row: string[]): string[] {
+  return row.map((cell) => normalizeText(String(cell)));
+}
+
+function parsedTableFromRows(index: number, rawRows: string[][], caption?: string): ParsedTable {
+  const normalizedCaption = caption ? normalizeText(caption) : undefined;
+  return {
+    index,
+    caption: normalizedCaption,
+    rawRows: rawRows.map((row) => row.map((cell) => String(cell))),
+    rows: rawRows.map(normalizeRow).filter((row) => row.some(Boolean))
+  };
+}
+
 function decodeHtmlEntities(value: string): string {
   return value
     .replace(/&nbsp;/gi, ' ')
@@ -214,13 +235,15 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&#39;/gi, "'");
 }
 
-function textFromHtml(html: string): string {
-  return normalizeText(decodeHtmlEntities(stripUnsafeHtml(html).replace(/<[^>]+>/g, ' ')));
+function rawTextFromHtml(html: string): string {
+  return decodeHtmlEntities(stripUnsafeHtml(html).replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function cellsFromRow(rowHtml: string): string[] {
   return Array.from(rowHtml.matchAll(/<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi))
-    .map((match) => textFromHtml(match[1]));
+    .map((match) => rawTextFromHtml(match[1]));
 }
 
 function tablesFromHtml(html: string): ParsedTable[] {
@@ -228,13 +251,10 @@ function tablesFromHtml(html: string): ParsedTable[] {
     (match, index) => {
       const tableHtml = match[1];
       const captionMatch = tableHtml.match(/<caption\b[^>]*>([\s\S]*?)<\/caption>/i);
-      return {
-        index,
-        caption: captionMatch ? textFromHtml(captionMatch[1]) : undefined,
-        rows: Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi))
-          .map((rowMatch) => cellsFromRow(rowMatch[1]))
-          .filter((row) => row.length > 0)
-      };
+      const rawRows = Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi))
+        .map((rowMatch) => cellsFromRow(rowMatch[1]))
+        .filter((row) => row.length > 0);
+      return parsedTableFromRows(index, rawRows, captionMatch ? rawTextFromHtml(captionMatch[1]) : undefined);
     }
   );
 }
@@ -267,19 +287,13 @@ function tablesFromJson(rawJson: unknown): ParsedTable[] {
           ? table.Rows
           : [];
 
-      return {
+      return parsedTableFromRows(
         index,
-        caption:
-          typeof table.title === 'string'
-            ? normalizeText(table.title)
-            : typeof table.caption === 'string'
-              ? normalizeText(table.caption)
-              : undefined,
-        rows: [
-          headers.map(normalizeText),
-          ...rows.map((row) => (Array.isArray(row) ? row.map((cell) => normalizeText(String(cell))) : []))
-        ].filter((row) => row.length > 0)
-      };
+        [headers, ...rows.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell)) : []))].filter(
+          (row) => row.length > 0
+        ),
+        typeof table.title === 'string' ? table.title : typeof table.caption === 'string' ? table.caption : undefined
+      );
     })
     .filter((table): table is ParsedTable => Boolean(table));
 }
@@ -288,13 +302,7 @@ function tablesFromExtractedTables(tables: CodalExtractedTable[] | undefined): P
   return (tables ?? [])
     .map((table): ParsedTable => {
       const rows = table.rows.length > 0 ? table.rows : [table.headers];
-      return {
-        index: table.index,
-        caption: table.caption,
-        rows: rows
-          .map((row) => row.map((cell) => normalizeText(String(cell))))
-          .filter((row) => row.some(Boolean))
-      };
+      return parsedTableFromRows(table.index, rows.map((row) => row.map((cell) => String(cell))), table.caption);
     })
     .filter((table) => table.rows.length > 0);
 }
@@ -388,12 +396,20 @@ function unitInfoForText(text: string): UnitInfo {
 
 function tablePreview(table: ParsedTable): ParserTablePreview {
   const text = tableText(table);
+  const rawHeaders = (table.rawRows[0] ?? []).slice(0, 12);
+  const normalizedHeaders = (table.rows[0] ?? []).slice(0, 12);
+  const rawRows = table.rawRows.slice(0, 10).map((row) => row.slice(0, 12));
+  const normalizedRows = table.rows.slice(0, 10).map((row) => row.slice(0, 12));
   return {
     index: table.index,
     caption: table.caption,
     detectedUnit: unitInfoForText(text).unit,
-    headers: (table.rows[0] ?? []).slice(0, 12),
-    rows: table.rows.slice(0, 10).map((row) => row.slice(0, 12)),
+    rawHeaders,
+    normalizedHeaders,
+    rawRows,
+    normalizedRows,
+    headers: normalizedHeaders,
+    rows: normalizedRows,
     textPreview: text.slice(0, 500),
     detectedLabels: matchedLabels(text),
     warnings: tableWarnings(table)
@@ -659,14 +675,17 @@ function tableFailureReasons(table: ParsedTable): string[] {
 function tableDiagnostics(table: ParsedTable): ParserTableDiagnostics {
   const text = tableText(table);
   const unitInfo = unitInfoForTable(table);
-  const headers = table.rows[0] ?? [];
+  const rawHeaders = table.rawRows[0] ?? [];
+  const normalizedHeaders = table.rows[0] ?? [];
 
   return {
     tableIndex: table.index,
     caption: table.caption,
     detectedUnit: unitInfo.unit,
-    rawHeaders: headers,
-    normalizedHeaders: headers.map(normalizeText),
+    rawHeaders,
+    normalizedHeaders,
+    firstRawRows: table.rawRows.slice(0, 10).map((row) => row.slice(0, 12)),
+    firstNormalizedRows: table.rows.slice(0, 10).map((row) => row.slice(0, 12)),
     firstRows: table.rows.slice(0, 10).map((row) => row.slice(0, 12)),
     detectedLabels: matchedLabels(text),
     totalRowCandidates: totalRowCandidatesForDiagnostics(table.rows).map((candidate) => ({

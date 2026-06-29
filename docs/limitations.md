@@ -22,9 +22,9 @@ This extension provides an estimate, not an audited valuation.
 - If a Codal detail page is PDF-like, empty, blocked, or shaped differently from supported table patterns, the UI should explain that no supported table was detected.
 - Unsupported Codal report formats are expected and should not block manual NAV calculations.
 - Codal monthly parser outputs are suggestions only and can be wrong when labels are ambiguous, report formats vary, units differ, numbers are malformed, or tables contain totals/subtotals in unexpected places.
-- Parser diagnostics expose a small normalized preview of public Codal table content to help review labels and candidate values; the preview is not proof that the extracted value is correct.
-- Parser diagnostics are visible in the widget/popup and can be copied as JSON or compact table-preview text. If browser clipboard access is unavailable, the extension shows a textarea fallback for manual copy.
-- Diagnostics include public Codal report metadata, detected table headers, first rows, candidate labels, and failure reasons. They do not include manual NAV inputs.
+- Parser diagnostics expose raw and normalized previews of public Codal table content to help review labels, row alignment, and candidate values; the preview is not proof that the extracted value is correct.
+- Parser diagnostics are visible in the widget/popup and can be copied as JSON or compact Markdown/text table-preview output. If browser clipboard access is unavailable, the extension shows a textarea fallback for manual copy.
+- Diagnostics include public Codal report metadata, report-selection diagnostics, detected raw/normalized table headers, first raw/normalized rows, candidate labels, rejected candidates, and failure reasons. They do not include manual NAV inputs.
 - Numeric extraction prefers clear total rows such as `جمع`, `جمع کل`, `مجموع`, and `مانده پایان دوره`. Multiple total rows, duplicate candidates, or unclear labels are intentionally downgraded.
 - The parser recognizes explicit unit hints such as `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان`. If the unit is unclear, it keeps the raw value, adds a warning, and avoids high-confidence bulk apply.
 - The parser preserves empty cells inside detected rows to keep Codal cost/market columns aligned, but unusual merged-cell layouts can still confuse extraction.
@@ -33,6 +33,7 @@ This extension provides an estimate, not an audited valuation.
 - Parsed Codal values never overwrite manual inputs automatically.
 - Applying all suggestions only applies high-confidence, mappable fields. Low-confidence and ambiguous values require individual review.
 - Source metadata is an audit aid, not proof that a parsed value is correct.
+- The TSETMC widget reuses a stable root element to avoid duplicate NAV widgets and duplicate disclaimers during rerenders. Some unusual client-side navigation behavior on TSETMC may still require a manual page reload if the host page replaces major DOM sections unexpectedly.
 
 ## Real TSETMC Page Notes
 

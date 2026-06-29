@@ -387,7 +387,11 @@ describe('parseMonthlyActivityReport', () => {
       expect.objectContaining({
         tableIndex: 2,
         rawHeaders: ['نام شرکت', 'تعداد سهام', 'بهای تمام شده', 'ارزش بازار', 'افزایش/کاهش'],
-        firstRows: expect.arrayContaining([
+        normalizedHeaders: ['نام شرکت', 'تعداد سهام', 'بهای تمام شده', 'ارزش بازار', 'افزایش/کاهش'],
+        firstRawRows: expect.arrayContaining([
+          ['مانده پایان دوره', '', '۶,۰۰۰', '۸,۰۰۰', '۲,۰۰۰']
+        ]),
+        firstNormalizedRows: expect.arrayContaining([
           ['مانده پایان دوره', '', '6,000', '8,000', '2,000']
         ]),
         totalRowCandidates: expect.arrayContaining([

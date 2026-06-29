@@ -285,10 +285,26 @@ function appendMonthlyDiagnostics(list: HTMLElement, result: MonthlyActivityPars
         `دلیل عدم استخراج: ${diagnostic.failureReasons.join('، ') || '-'}`
       ].join(' | ');
       item.appendChild(details);
+
+      const headers = document.createElement('pre');
+      headers.className = 'ibnav-preview-code';
+      headers.textContent = [
+        `ستون‌ها (raw): ${diagnostic.rawHeaders.join(' | ') || '-'}`,
+        `ستون‌ها (normalized): ${diagnostic.normalizedHeaders.join(' | ') || '-'}`
+      ].join('\n');
+      item.appendChild(headers);
     }
     const rows = document.createElement('pre');
     rows.className = 'ibnav-preview-code';
-    rows.textContent = table.rows.map((row) => row.join(' | ')).join('\n');
+    rows.textContent = diagnostic
+      ? [
+          'ردیف‌های نمونه (raw):',
+          ...diagnostic.firstRawRows.slice(0, 5).map((row, index) => `${index + 1}. ${row.join(' | ')}`),
+          '',
+          'ردیف‌های نمونه (normalized):',
+          ...diagnostic.firstNormalizedRows.slice(0, 5).map((row, index) => `${index + 1}. ${row.join(' | ')}`)
+        ].join('\n')
+      : table.normalizedRows.map((row) => row.join(' | ')).join('\n');
     item.appendChild(rows);
     preview.appendChild(item);
   }

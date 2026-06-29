@@ -14,6 +14,16 @@ const result: MonthlyActivityParseResult = {
       index: 0,
       caption: 'صورت وضعیت پورتفوی',
       detectedUnit: 'نامشخص',
+      rawHeaders: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+      normalizedHeaders: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+      rawRows: [
+        ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+        ['جمع', '---', 'نامشخص']
+      ],
+      normalizedRows: [
+        ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+        ['جمع', '---', 'نامشخص']
+      ],
       headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
       rows: [
         ['شرح', 'بهای تمام شده', 'ارزش بازار'],
@@ -44,6 +54,14 @@ const result: MonthlyActivityParseResult = {
         detectedUnit: 'نامشخص',
         rawHeaders: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
         normalizedHeaders: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+        firstRawRows: [
+          ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+          ['جمع', '---', 'نامشخص']
+        ],
+        firstNormalizedRows: [
+          ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+          ['جمع', '---', 'نامشخص']
+        ],
         firstRows: [
           ['شرح', 'بهای تمام شده', 'ارزش بازار'],
           ['جمع', '---', 'نامشخص']
@@ -68,7 +86,8 @@ describe('parser diagnostics UI helpers', () => {
     expect(parsed.symbol).toBe('وصندوق');
     expect(parsed.parserWarnings).toContain('واحد گزارش مشخص نیست');
     expect(parsed.tables[0].rawHeaders).toEqual(['شرح', 'بهای تمام شده', 'ارزش بازار']);
-    expect(parsed.tables[0].firstRows[1]).toEqual(['جمع', '---', 'نامشخص']);
+    expect(parsed.tables[0].firstRawRows[1]).toEqual(['جمع', '---', 'نامشخص']);
+    expect(parsed.tables[0].firstNormalizedRows[1]).toEqual(['جمع', '---', 'نامشخص']);
     expect(parsed.tables[0].failureReasons).toContain('واحد گزارش مشخص نیست');
   });
 
@@ -78,6 +97,8 @@ describe('parser diagnostics UI helpers', () => {
     expect(text).toContain('تعداد جدول‌ها: 1');
     expect(text).toContain('### جدول 0');
     expect(text).toContain('شرح | بهای تمام شده | ارزش بازار');
+    expect(text).toContain('جمع | --- | نامشخص');
+    expect(text).toContain('دلیل عدم استخراج: واحد گزارش مشخص نیست');
   });
 
   it('falls back without throwing when clipboard is unavailable', async () => {

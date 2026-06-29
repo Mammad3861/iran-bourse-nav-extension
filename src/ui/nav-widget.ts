@@ -30,6 +30,9 @@ import {
 } from './parser-diagnostics';
 import styles from './styles.css?inline';
 
+const WIDGET_ROOT_ID = 'ibnav-widget';
+let widgetRenderSequence = 0;
+
 export interface NavWidgetOptions {
   symbol: string;
   insCode?: string;
@@ -67,6 +70,19 @@ function ensureStyle(): void {
   style.id = 'ibnav-style';
   style.textContent = styles;
   document.documentElement.appendChild(style);
+}
+
+function removeDuplicateWidgetRoots(activeRoot: HTMLElement): void {
+  document.querySelectorAll<HTMLElement>(`#${WIDGET_ROOT_ID}`).forEach((root) => {
+    if (root !== activeRoot) {
+      root.remove();
+    }
+  });
+}
+
+function isActiveWidgetRender(root: HTMLElement, renderId: number): boolean {
+  void root;
+  return widgetRenderSequence === renderId;
 }
 
 function numberToInputValue(value: number | undefined): string {
@@ -384,10 +400,26 @@ function appendMonthlyDiagnostics(
         `دلیل عدم استخراج: ${diagnostic.failureReasons.join('، ') || '-'}`
       ].join(' | ');
       item.appendChild(details);
+
+      const headers = document.createElement('pre');
+      headers.className = 'ibnav-preview-code';
+      headers.textContent = [
+        `ستون‌ها (raw): ${diagnostic.rawHeaders.join(' | ') || '-'}`,
+        `ستون‌ها (normalized): ${diagnostic.normalizedHeaders.join(' | ') || '-'}`
+      ].join('\n');
+      item.appendChild(headers);
     }
     const rows = document.createElement('pre');
     rows.className = 'ibnav-preview-code';
-    rows.textContent = table.rows.map((row) => row.join(' | ')).join('\n');
+    rows.textContent = diagnostic
+      ? [
+          'ردیف‌های نمونه (raw):',
+          ...diagnostic.firstRawRows.slice(0, 5).map((row, index) => `${index + 1}. ${row.join(' | ')}`),
+          '',
+          'ردیف‌های نمونه (normalized):',
+          ...diagnostic.firstNormalizedRows.slice(0, 5).map((row, index) => `${index + 1}. ${row.join(' | ')}`)
+        ].join('\n')
+      : table.normalizedRows.map((row) => row.join(' | ')).join('\n');
     item.appendChild(rows);
     preview.appendChild(item);
   }
@@ -566,17 +598,16 @@ function renderMonthlySuggestions(
 }
 
 export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLElement> {
+  const renderId = ++widgetRenderSequence;
+  const mount = options.mount ?? document.body;
   ensureStyle();
-
-  const existing = document.getElementById('ibnav-widget');
-  existing?.remove();
 
   let activeRecord = await getManualOverride(options.symbol);
   const inputs = activeRecord?.inputs ?? emptyNavInputs();
   inputs.currentPrice = inputs.currentPrice ?? options.currentPrice;
 
-  const root = document.createElement('section');
-  root.id = 'ibnav-widget';
+  const root = (document.getElementById(WIDGET_ROOT_ID) as HTMLElement | null) ?? document.createElement('section');
+  root.id = WIDGET_ROOT_ID;
   root.className = 'ibnav-root ibnav-widget';
   root.innerHTML = `
     <header class="ibnav-header">
@@ -656,6 +687,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   } else {
     requestCodalDiscovery(codalSymbolValidation.symbol, options.instrumentName)
       .then(async (result) => {
+        if (!isActiveWidgetRender(root, renderId)) return;
         renderCodalDiscovery(root, result);
         const report = result.monthlyActivityReport ?? result.financialStatementReport;
         if (!report) {
@@ -666,6 +698,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           return;
         }
         const detailResult = await requestCodalReportDetail(report);
+        if (!isActiveWidgetRender(root, renderId)) return;
         renderCodalDetail(root, detailResult);
         if (detailResult.detail) {
           renderMonthlySuggestions(
@@ -680,6 +713,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         }
       })
       .catch((error: unknown) => {
+        if (!isActiveWidgetRender(root, renderId)) return;
         renderCodalDiscovery(root, {
           status: 'failed',
           symbol: options.symbol,
@@ -734,6 +768,10 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     }
   });
 
-  (options.mount ?? document.body).appendChild(root);
+  removeDuplicateWidgetRoots(root);
+  if (!root.isConnected) {
+    mount.appendChild(root);
+  }
+  removeDuplicateWidgetRoots(root);
   return root;
 }

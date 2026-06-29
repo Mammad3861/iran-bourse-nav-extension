@@ -145,9 +145,13 @@ That diagnostics section shows candidate reports, scores, selected/rejected stat
 
 When Codal report detail is fetched but values are not extracted, open the NAV widget or popup and expand `نمایش جزئیات تشخیص Parser`.
 
-The diagnostics section shows each detected table, detected unit, labels, first rows, total-row candidates, cost-column candidates, market-value-column candidates, and extraction failure reasons. Use `کپی تشخیص Parser` to copy a readable JSON payload, or `کپی پیش‌نمایش جدول‌ها` to copy a compact text preview. If the browser blocks clipboard access, the extension shows a textarea fallback for manual copy.
+The diagnostics section shows each detected table, detected unit, labels, raw and normalized headers, raw and normalized sample rows, total-row candidates, cost-column candidates, market-value-column candidates, rejected candidates, and extraction failure reasons.
+
+Use `کپی تشخیص Parser` to copy a readable JSON payload with the full parser diagnostics, Codal report-selection diagnostics, parser warnings, and table previews. Use `کپی پیش‌نمایش جدول‌ها` to copy a compact Markdown/text preview with report title, symbol, table count, headers, sample rows, and failure reasons. If the browser blocks clipboard access, the extension shows a textarea fallback for manual copy.
 
 Diagnostics contain only public Codal report content already fetched by the extension. Manual NAV inputs are not included.
+
+The TSETMC widget uses a stable root element and reuses the existing root during rerenders or route-style page changes, so the NAV widget footer and disclaimer should not duplicate.
 
 ## Project Structure
 
