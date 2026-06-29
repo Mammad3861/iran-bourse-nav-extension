@@ -6,6 +6,24 @@ export interface SymbolDetectionResult {
 }
 
 const symbolParamNames = ['symbol', 'Symbol', 'inscode', 'i'];
+const uiSymbolLabels = new Set([
+  'خرید',
+  'فروش',
+  'سفارش',
+  'دیدهبان',
+  'دیده‌بان',
+  'پرتفوی',
+  'پیام',
+  'نمودار',
+  'سابقه',
+  'اطلاعات',
+  'حقیقی',
+  'حقوقی',
+  'EPS',
+  'P/E',
+  'NAV',
+  'TSETMC'
+]);
 
 export function normalizeSymbol(value: string | null | undefined): string | undefined {
   if (!value) {
@@ -17,6 +35,17 @@ export function normalizeSymbol(value: string | null | undefined): string | unde
     .trim();
 
   return normalized || undefined;
+}
+
+export function normalizeSymbolForValidation(value: string | null | undefined): string {
+  return normalizePersianArabicDigits(value ?? '')
+    .replace(/\u200c/g, '')
+    .trim();
+}
+
+export function isKnownUiSymbolLabel(value: string | null | undefined): boolean {
+  const normalized = normalizeSymbolForValidation(value).toUpperCase();
+  return uiSymbolLabels.has(normalized);
 }
 
 export function detectSymbolFromUrl(url: string): SymbolDetectionResult {

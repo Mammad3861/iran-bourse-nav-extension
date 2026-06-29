@@ -4,6 +4,7 @@ import {
   detectInsCodeFromUrl,
   extractCurrentPriceFromTsetmcDom,
   extractPriceCandidatesFromText,
+  extractTsetmcSymbolDiagnostics,
   getInstrumentInfoByInsCode,
   getLatestPriceByInsCode,
   readClosingPriceFromDocument,
@@ -288,6 +289,84 @@ describe('tsetmc-client', () => {
     expect(detectCurrentTsetmcSymbol(documentMock, 'https://www.tsetmc.com/')).toEqual({
       source: 'unknown'
     });
+  });
+
+  it('does not accept UI action labels as symbols from visible text', () => {
+    const nodes = [
+      { textContent: 'خرید' },
+      { textContent: 'فروش' },
+      { textContent: 'سفارش' },
+      { textContent: 'پرتفوی' }
+    ];
+    const documentMock = {
+      querySelectorAll: vi.fn((selector: string) => {
+        if (selector.includes('bigheader') || selector.includes('MainBox')) return nodes;
+        return [];
+      }),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    const diagnostics = extractTsetmcSymbolDiagnostics(
+      documentMock,
+      'https://www.tsetmc.com/instInfo/37204371816016200'
+    );
+
+    expect(diagnostics.selected).toBeUndefined();
+    expect(diagnostics.candidates.map((candidate) => candidate.value)).not.toContain('خرید');
+    expect(detectCurrentTsetmcSymbol(documentMock, 'https://www.tsetmc.com/instInfo/37204371816016200')).toEqual({
+      source: 'unknown'
+    });
+  });
+
+  it('rejects UI labels even when they appear in trusted symbol attributes', () => {
+    const element = {
+      textContent: 'خرید',
+      getAttribute: vi.fn((name: string) => (name === 'data-symbol' ? 'خرید' : null))
+    };
+    const documentMock = {
+      querySelectorAll: vi.fn(() => []),
+      querySelector: vi.fn((selector: string) => (selector === '[data-symbol]' ? element : null))
+    } as unknown as Document;
+
+    const diagnostics = extractTsetmcSymbolDiagnostics(
+      documentMock,
+      'https://www.tsetmc.com/instInfo/37204371816016200'
+    );
+
+    expect(diagnostics.selected).toBeUndefined();
+    expect(diagnostics.rejectedCandidates).toEqual(
+      expect.arrayContaining([expect.objectContaining({ value: 'خرید', rejectedReason: 'candidate is a TSETMC UI label' })])
+    );
+  });
+
+  it('extracts a real Persian symbol from document title fallback instead of UI labels', () => {
+    const title = {
+      textContent: 'سرمایه گذاری صندوق بازنشستگی (وصندوق) - TSETMC'
+    };
+    const documentMock = {
+      querySelectorAll: vi.fn(() => []),
+      querySelector: vi.fn((selector: string) => (selector === 'title' ? title : null))
+    } as unknown as Document;
+
+    expect(detectCurrentTsetmcSymbol(documentMock, 'https://www.tsetmc.com/instInfo/37204371816016200')).toEqual({
+      symbol: 'وصندوق',
+      source: 'dom'
+    });
+  });
+
+  it('accepts known Persian stock symbols from trusted headers', () => {
+    for (const symbol of ['وصندوق', 'وغدیر']) {
+      const header = { textContent: `شرکت نمونه (${symbol}) - بورس` };
+      const documentMock = {
+        querySelectorAll: vi.fn((selector: string) => (selector.includes('bigheader') ? [header] : [])),
+        querySelector: vi.fn(() => null)
+      } as unknown as Document;
+
+      expect(detectCurrentTsetmcSymbol(documentMock, 'https://www.tsetmc.com/instInfo/37204371816016200')).toEqual({
+        symbol,
+        source: 'dom'
+      });
+    }
   });
 
   it('reads latest and closing prices from compact TSETMC table rows', () => {

@@ -34,6 +34,9 @@ describe('Codal background bridge', () => {
 
   it('rejects invalid TSETMC/site labels before Codal search', () => {
     expect(validateCodalSearchSymbol('TSETMC').valid).toBe(false);
+    expect(validateCodalSearchSymbol('خرید').valid).toBe(false);
+    expect(validateCodalSearchSymbol('فروش').valid).toBe(false);
+    expect(validateCodalSearchSymbol('پرتفوی').valid).toBe(false);
     expect(validateCodalSearchSymbol('نماد نامشخص').valid).toBe(false);
     expect(validateCodalSearchSymbol('https://www.tsetmc.com').valid).toBe(false);
     expect(validateCodalSearchSymbol('778253364357513').valid).toBe(false);

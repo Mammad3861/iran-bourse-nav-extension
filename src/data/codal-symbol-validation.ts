@@ -1,4 +1,5 @@
 import { normalizePersianArabicDigits } from '../core/number-utils';
+import { isKnownUiSymbolLabel } from '../core/symbol-utils';
 
 const invalidExactSymbols = new Set(['TSETMC', 'نامشخص', 'نمادنامشخص', 'UNKNOWN', 'N/A', 'NA']);
 
@@ -22,7 +23,7 @@ export function validateCodalSearchSymbol(symbol: string | null | undefined): Co
     return { valid: false, reason: 'نماد معتبر تشخیص داده نشد؛ جستجوی کدال انجام نشد' };
   }
 
-  if (invalidExactSymbols.has(upper) || normalized.includes('نامشخص')) {
+  if (invalidExactSymbols.has(upper) || normalized.includes('نامشخص') || isKnownUiSymbolLabel(normalized)) {
     return { valid: false, reason: 'نماد معتبر تشخیص داده نشد؛ جستجوی کدال انجام نشد' };
   }
 
