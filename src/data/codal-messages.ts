@@ -29,6 +29,7 @@ export interface CodalLatestFinancialStatementMessage {
 export interface CodalDiscoverLatestReportsMessage {
   type: 'CODAL_DISCOVER_LATEST_REPORTS';
   symbol: string;
+  issuerName?: string;
 }
 
 export interface CodalGetReportDetailMessage {

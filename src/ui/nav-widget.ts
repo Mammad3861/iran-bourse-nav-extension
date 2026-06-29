@@ -22,7 +22,12 @@ import {
   markFieldAsManual,
   suggestionTarget
 } from '../data/suggestion-application';
-import { copyTextWithFallback, parserDiagnosticsJson, parserTablePreviewText } from './parser-diagnostics';
+import {
+  codalDiscoveryDiagnosticsJson,
+  copyTextWithFallback,
+  parserDiagnosticsJson,
+  parserTablePreviewText
+} from './parser-diagnostics';
 import styles from './styles.css?inline';
 
 export interface NavWidgetOptions {
@@ -103,6 +108,85 @@ function reportSummary(report: CodalReportReference | undefined): string {
   return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
 }
 
+function discoverySelectionNotice(result: CodalReportDiscoveryResult): string | undefined {
+  const selections = [result.diagnostics?.monthlyActivity, result.diagnostics?.financialStatement].filter(Boolean);
+  if (selections.some((selection) => selection?.selectedWarnings.length)) {
+    return 'گزارش انتخاب‌شده ممکن است مربوط به ناشر دیگری باشد؛ تشخیص گزارش را بررسی کنید.';
+  }
+  if (selections.some((selection) => selection?.selectedConfidence === 'high' || selection?.selectedConfidence === 'medium')) {
+    return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
+  }
+  if (result.diagnostics) {
+    return 'گزارش به دلیل عدم تطابق نماد/ناشر نادیده گرفته شد.';
+  }
+  return undefined;
+}
+
+function renderDiscoveryDiagnostics(root: HTMLElement, result: CodalReportDiscoveryResult): void {
+  const container = root.querySelector<HTMLElement>('[data-ibnav-codal="diagnostics"]');
+  if (!container) return;
+  container.textContent = '';
+  if (!result.diagnostics) return;
+
+  const details = document.createElement('details');
+  details.className = 'ibnav-table-preview';
+  const summary = document.createElement('summary');
+  summary.textContent = 'تشخیص انتخاب گزارش کدال';
+  details.appendChild(summary);
+
+  const monthly = result.diagnostics.monthlyActivity;
+  const financial = result.diagnostics.financialStatement;
+  const meta = document.createElement('p');
+  meta.className = 'ibnav-muted';
+  meta.textContent = [
+    `نماد: ${result.diagnostics.requestedSymbol}`,
+    result.diagnostics.requestedIssuerName ? `ناشر: ${result.diagnostics.requestedIssuerName}` : undefined,
+    monthly ? `گزارش ماهانه: ${monthly.selectedConfidence}` : undefined,
+    financial ? `صورت مالی: ${financial.selectedConfidence}` : undefined
+  ]
+    .filter(Boolean)
+    .join(' | ');
+  details.appendChild(meta);
+
+  const rejected = [...(monthly?.candidates ?? []), ...(financial?.candidates ?? [])]
+    .filter((candidate) => candidate.rejectedReasons.length || candidate.warnings.length)
+    .slice(0, 6);
+  if (rejected.length) {
+    const list = document.createElement('pre');
+    list.className = 'ibnav-preview-code';
+    list.textContent = rejected
+      .map((candidate) =>
+        [
+          candidate.report.symbol,
+          candidate.report.title,
+          `score=${candidate.score.toFixed(1)}`,
+          [...candidate.rejectedReasons, ...candidate.warnings].join('، ')
+        ].join(' | ')
+      )
+      .join('\n');
+    details.appendChild(list);
+  }
+
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'ibnav-apply ibnav-secondary';
+  copyButton.textContent = 'کپی تشخیص انتخاب گزارش';
+  copyButton.addEventListener('click', async () => {
+    const outcome = await copyTextWithFallback(codalDiscoveryDiagnosticsJson(result), window.navigator.clipboard, (text) =>
+      showManualCopyFallback(details, text)
+    );
+    setApplyStatus(
+      root,
+      outcome === 'copied'
+        ? 'تشخیص انتخاب گزارش کپی شد.'
+        : 'کپی خودکار انجام نشد؛ تشخیص انتخاب گزارش برای کپی دستی نمایش داده شد.',
+      outcome !== 'copied'
+    );
+  });
+  details.appendChild(copyButton);
+  container.appendChild(details);
+}
+
 function currentPriceSourceText(source: ManualOverrideRecord['currentPriceSource']): string {
   if (source === 'dom-latest-trade' || source === 'api-latest-trade' || source === 'page') {
     return 'قیمت فعلی: خوانده‌شده از آخرین معامله';
@@ -144,9 +228,14 @@ function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryRes
   }
 
   if (result.status === 'found') {
-    status.textContent = 'ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد';
+    status.textContent = `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
+      discoverySelectionNotice(result) ? ` - ${discoverySelectionNotice(result)}` : ''
+    }`;
   } else if (result.status === 'not-found') {
-    status.textContent = result.errorMessage ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد';
+    status.textContent =
+      result.errorMessage ??
+      discoverySelectionNotice(result) ??
+      'برای این نماد گزارش قابل اتکایی پیدا نشد';
   } else {
     status.textContent = `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`;
   }
@@ -155,6 +244,7 @@ function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryRes
   financial.textContent = reportSummary(result.financialStatementReport);
   updateReportLink(root, '[data-ibnav-codal-link="monthly"]', result.monthlyActivityReport);
   updateReportLink(root, '[data-ibnav-codal-link="financial"]', result.financialStatementReport);
+  renderDiscoveryDiagnostics(root, result);
 }
 
 function detailStatusText(result: CodalReportDetailResult): string {
@@ -528,6 +618,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <a class="ibnav-link" data-ibnav-codal-link="monthly" target="_blank" rel="noreferrer" hidden>مشاهده گزارش فعالیت ماهانه</a>
         <div class="ibnav-row"><span>صورت مالی</span><span data-ibnav-codal="financial">-</span></div>
         <a class="ibnav-link" data-ibnav-codal-link="financial" target="_blank" rel="noreferrer" hidden>مشاهده صورت مالی</a>
+        <div data-ibnav-codal="diagnostics"></div>
         <div class="ibnav-row"><span>جزئیات آخرین گزارش</span><span data-ibnav-codal-detail="status">در انتظار نتیجه جستجو</span></div>
         <div class="ibnav-row"><span>زمان دریافت جزئیات</span><span data-ibnav-codal-detail="fetchedAt">-</span></div>
         <p class="ibnav-muted" data-ibnav-codal-detail="warning">ساختار گزارش ممکن است در این نسخه پشتیبانی نشود.</p>
@@ -563,7 +654,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       errorMessage: codalSymbolValidation.reason
     });
   } else {
-    requestCodalDiscovery(codalSymbolValidation.symbol)
+    requestCodalDiscovery(codalSymbolValidation.symbol, options.instrumentName)
       .then(async (result) => {
         renderCodalDiscovery(root, result);
         const report = result.monthlyActivityReport ?? result.financialStatementReport;

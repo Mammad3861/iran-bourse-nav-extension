@@ -14,6 +14,9 @@ This extension provides an estimate, not an audited valuation.
 - Codal requests run through the extension background service worker. If the service worker is unavailable, asleep, or missing host permissions, the UI shows a safe warning and the manual calculator remains usable.
 - Invalid detected symbols such as `TSETMC`, `InsCode:*`, `نماد نامشخص`, URLs, domains, or numeric-only values are intentionally not searched in Codal.
 - A discovered Codal report link or title should be treated as a convenience reference, not a verified data source.
+- Codal report selection uses best-effort symbol, issuer-name, title, report-type, and publish-date scoring. This can reject suspicious subsidiary reports, but it cannot prove issuer identity with audit-level certainty.
+- Reports with different Codal symbols, weak issuer metadata, or titles referencing another company in parentheses may be ignored or marked suspicious. Users should review selection diagnostics when expected reports are missing.
+- Generic clarification letters may appear in search results; they are downgraded and should not be treated as audited financial statements without manual review.
 - Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
 - Detected Codal tables may come from HTML, JSON, or script-embedded data. Row and column counts or header previews do not imply the report format is fully supported for value extraction.
 - If a Codal detail page is PDF-like, empty, blocked, or shaped differently from supported table patterns, the UI should explain that no supported table was detected.

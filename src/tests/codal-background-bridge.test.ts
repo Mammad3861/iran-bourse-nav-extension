@@ -111,6 +111,27 @@ describe('Codal background bridge', () => {
     expect(response).toEqual(expect.objectContaining({ ok: true }));
   });
 
+  it('passes issuer name through discovery messages when available', async () => {
+    const dependencies = mockDependencies();
+    dependencies.discoverLatestCodalReports.mockResolvedValue({
+      status: 'not-found',
+      symbol: 'وغدیر',
+      sourceVerified: false,
+      checkedAt: '2026-06-28T00:00:00.000Z'
+    });
+    const handler = createCodalMessageHandler(dependencies);
+
+    await handler({
+      type: 'CODAL_DISCOVER_LATEST_REPORTS',
+      symbol: 'وغدیر',
+      issuerName: 'سرمایه گذاری غدیر هلدینگ'
+    });
+
+    expect(dependencies.discoverLatestCodalReports).toHaveBeenCalledWith('وغدیر', {
+      requestedIssuerName: 'سرمایه گذاری غدیر هلدینگ'
+    });
+  });
+
   it('reuses in-flight background Codal requests for the same symbol', async () => {
     const dependencies = mockDependencies();
     let resolveDiscovery: (value: unknown) => void = () => {};

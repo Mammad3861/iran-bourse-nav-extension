@@ -20,6 +20,33 @@ export interface CodalReportReference {
   letterCode?: string;
   url?: string;
   raw?: unknown;
+  selectionDiagnostics?: CodalReportSelectionDiagnostics;
+}
+
+export interface CodalReportSelectionCandidate {
+  report: CodalReportReference;
+  score: number;
+  selected: boolean;
+  reasons: string[];
+  warnings: string[];
+  rejectedReasons: string[];
+}
+
+export interface CodalReportSelectionDiagnostics {
+  requestedSymbol: string;
+  requestedIssuerName?: string;
+  reportKind: CodalReportKind;
+  selectedReport?: CodalReportReference;
+  selectedConfidence: 'high' | 'medium' | 'low' | 'none';
+  selectedWarnings: string[];
+  candidates: CodalReportSelectionCandidate[];
+}
+
+export interface CodalDiscoveryDiagnostics {
+  requestedSymbol: string;
+  requestedIssuerName?: string;
+  monthlyActivity?: CodalReportSelectionDiagnostics;
+  financialStatement?: CodalReportSelectionDiagnostics;
 }
 
 export interface CodalReportDiscoveryResult {
@@ -27,6 +54,7 @@ export interface CodalReportDiscoveryResult {
   symbol: string;
   monthlyActivityReport?: CodalReportReference;
   financialStatementReport?: CodalReportReference;
+  diagnostics?: CodalDiscoveryDiagnostics;
   errorMessage?: string;
   sourceVerified: false;
   checkedAt: string;
@@ -57,6 +85,7 @@ export interface CodalReportDetail {
   publishedAt?: string;
   tracingNo?: string;
   reportId?: string;
+  selectionDiagnostics?: CodalReportSelectionDiagnostics;
   contentType: 'html' | 'json' | 'unknown';
   rawHtml?: string;
   rawJson?: unknown;
@@ -78,6 +107,7 @@ export interface CodalSearchOptions {
   timeoutMs?: number;
   retryLimit?: number;
   cacheTtlMs?: number;
+  requestedIssuerName?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -364,6 +394,190 @@ function sortReportsNewestFirst(reports: CodalReportReference[]): CodalReportRef
     const right = b.publishedAt ? Date.parse(b.publishedAt) : 0;
     return right - left;
   });
+}
+
+function normalizeIssuerText(value: string | undefined): string {
+  return normalizePersianArabicDigits(value ?? '')
+    .replace(/ي/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/\u200c/g, ' ')
+    .replace(/[()（）[\]{}«»"']/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compactIssuerText(value: string | undefined): string {
+  return normalizeIssuerText(value).replace(/\s+/g, '');
+}
+
+function normalizedSymbol(value: string | undefined): string {
+  return compactIssuerText(value);
+}
+
+function issuerStronglyMatches(report: CodalReportReference, requestedIssuerName: string | undefined): boolean {
+  const requested = compactIssuerText(requestedIssuerName);
+  if (!requested) {
+    return false;
+  }
+
+  const company = compactIssuerText(report.companyName);
+  const title = compactIssuerText(report.title);
+  return Boolean(
+    (company && (company.includes(requested) || requested.includes(company))) ||
+      (title && (title.includes(requested) || requested.includes(title)))
+  );
+}
+
+function titleParentheticalSegments(title: string): string[] {
+  return Array.from(title.matchAll(/[([]([^()[\]]+)[)\]]/g)).map((match) => normalizeIssuerText(match[1]));
+}
+
+function publishTime(report: CodalReportReference): number {
+  const parsed = report.publishedAt ? Date.parse(normalizePersianArabicDigits(report.publishedAt)) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function reportKindPatterns(kind: CodalReportKind): RegExp[] {
+  if (kind === 'monthly-activity') {
+    return monthlyActivityPatterns;
+  }
+  if (kind === 'financial-statement') {
+    return financialStatementPatterns;
+  }
+  return [];
+}
+
+function scoreReportCandidate(options: {
+  report: CodalReportReference;
+  requestedSymbol: string;
+  requestedIssuerName?: string;
+  kind: CodalReportKind;
+}): Omit<CodalReportSelectionCandidate, 'selected'> {
+  const { report, requestedSymbol, requestedIssuerName, kind } = options;
+  const requestedSymbolNormalized = normalizedSymbol(requestedSymbol);
+  const reportSymbolNormalized = normalizedSymbol(report.symbol);
+  const title = normalizeIssuerText(report.title);
+  const company = normalizeIssuerText(report.companyName);
+  const parentheticals = titleParentheticalSegments(report.title);
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+  const rejectedReasons: string[] = [];
+  let score = 0;
+
+  if (reportSymbolNormalized === requestedSymbolNormalized) {
+    score += 80;
+    reasons.push('نماد گزارش دقیقاً با نماد درخواست‌شده تطبیق دارد.');
+  } else if (reportSymbolNormalized) {
+    score -= 160;
+    rejectedReasons.push('نماد گزارش با نماد درخواست‌شده تطبیق ندارد.');
+  } else {
+    score -= 35;
+    warnings.push('نماد گزارش در متادیتای کدال موجود نیست.');
+  }
+
+  if (requestedIssuerName) {
+    if (issuerStronglyMatches(report, requestedIssuerName)) {
+      score += 35;
+      reasons.push('نام ناشر/شرکت با ناشر درخواست‌شده تطبیق قوی دارد.');
+    } else if (company) {
+      score -= 45;
+      warnings.push('نام شرکت گزارش با ناشر تشخیص‌داده‌شده از TSETMC تطبیق قوی ندارد.');
+    } else {
+      score -= 15;
+      warnings.push('نام شرکت گزارش برای تطبیق ناشر موجود نیست.');
+    }
+  }
+
+  if (titleMatches(report.title, reportKindPatterns(kind))) {
+    score += kind === 'monthly-activity' ? 35 : 30;
+    reasons.push('عنوان گزارش با نوع گزارش مورد انتظار تطبیق دارد.');
+  } else {
+    score -= 120;
+    rejectedReasons.push('عنوان گزارش با نوع گزارش مورد انتظار تطبیق ندارد.');
+  }
+
+  if (kind === 'monthly-activity' && /دوره\s*1\s*ماهه|دوره\s*یک\s*ماهه|1\s*ماهه/.test(title)) {
+    score += 12;
+    reasons.push('گزارش ماهانه دوره 1 ماهه است.');
+  }
+
+  for (const segment of parentheticals) {
+    const compactSegment = compactIssuerText(segment);
+    const requestedIssuer = compactIssuerText(requestedIssuerName);
+    const segmentMatchesRequested =
+      requestedIssuer && (compactSegment.includes(requestedIssuer) || requestedIssuer.includes(compactSegment));
+    const segmentMentionsDifferentCompany =
+      compactSegment.length > 5 &&
+      !segmentMatchesRequested &&
+      !compactSegment.includes(requestedSymbolNormalized) &&
+      /(شرکت|صنعتی|بازرگانی|تولیدی|سرمایهگذاری|هلدینگ)/.test(compactSegment);
+    if (segmentMentionsDifferentCompany) {
+      score -= 70;
+      warnings.push('عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.');
+    }
+  }
+
+  if (/شفاف\s*سازی|شفاف‌سازی|اطلاعیه|توضیحات/.test(title)) {
+    score -= kind === 'financial-statement' ? 55 : 65;
+    warnings.push('عنوان گزارش شبیه اطلاعیه/شفاف‌سازی است و منبع اصلی مالی محسوب نمی‌شود.');
+  }
+
+  score += Math.min(20, Math.max(0, publishTime(report) / 86_400_000_000));
+
+  return {
+    report,
+    score,
+    reasons,
+    warnings,
+    rejectedReasons
+  };
+}
+
+function selectedConfidence(score: number, warnings: string[]): CodalReportSelectionDiagnostics['selectedConfidence'] {
+  if (warnings.some((warning) => warning.includes('شفاف‌سازی') || warning.includes('اطلاعیه'))) return 'low';
+  if (score >= 120 && warnings.length === 0) return 'high';
+  if (score >= 90) return 'medium';
+  if (score >= 70) return 'low';
+  return 'none';
+}
+
+function selectReportByRank(
+  reports: CodalReportReference[],
+  requestedSymbol: string,
+  kind: CodalReportKind,
+  requestedIssuerName?: string
+): CodalReportSelectionDiagnostics {
+  const scored = reports
+    .map((report) => scoreReportCandidate({ report, requestedSymbol, requestedIssuerName, kind }))
+    .sort((left, right) => right.score - left.score || publishTime(right.report) - publishTime(left.report));
+  const selected = scored.find((candidate) => candidate.rejectedReasons.length === 0 && candidate.score >= 70);
+  const confidence = selected ? selectedConfidence(selected.score, selected.warnings) : 'none';
+  const diagnostics: CodalReportSelectionDiagnostics = {
+    requestedSymbol,
+    requestedIssuerName,
+    reportKind: kind,
+    selectedReport: selected && confidence !== 'none' ? { ...selected.report, selectionDiagnostics: undefined } : undefined,
+    selectedConfidence: confidence,
+    selectedWarnings: selected?.warnings ?? [],
+    candidates: scored.map((candidate) => ({
+      ...candidate,
+      selected: candidate === selected && confidence !== 'none'
+    }))
+  };
+
+  return diagnostics;
+}
+
+function reportFromSelectionDiagnostics(
+  diagnostics: CodalReportSelectionDiagnostics
+): CodalReportReference | undefined {
+  return diagnostics.selectedReport
+    ? {
+        ...diagnostics.selectedReport,
+        selectionDiagnostics: diagnostics
+      }
+    : undefined;
 }
 
 function titleMatches(title: string, patterns: RegExp[]): boolean {
@@ -817,9 +1031,11 @@ export function isPortfolioReport(title: string): boolean {
 
 function getLatestMatchingReport(
   reports: CodalReportReference[],
-  patterns: RegExp[]
+  kind: CodalReportKind,
+  requestedSymbol: string,
+  requestedIssuerName?: string
 ): CodalReportReference | undefined {
-  return sortReportsNewestFirst(reports.filter((report) => titleMatches(report.title, patterns)))[0];
+  return reportFromSelectionDiagnostics(selectReportByRank(reports, requestedSymbol, kind, requestedIssuerName));
 }
 
 async function getReportsByKind(
@@ -836,8 +1052,9 @@ async function getReportsByKind(
 
   const reports = await searchReportsBySymbol(symbol, options);
   const matching = sortReportsNewestFirst(reports.filter((report) => titleMatches(report.title, patterns)));
-  await setCachedReports(symbol, kind, matching);
-  return matching[0];
+  const selected = getLatestMatchingReport(matching, kind, symbol, options.requestedIssuerName);
+  await setCachedReports(symbol, kind, selected ? [selected] : []);
+  return selected;
 }
 
 export async function searchReportsBySymbol(
@@ -910,14 +1127,37 @@ export async function discoverLatestCodalReports(
 
   try {
     const reports = await searchReportsBySymbol(normalizedSymbol, options);
-    const monthlyActivityReport = getLatestMatchingReport(reports, monthlyActivityPatterns);
-    const financialStatementReport = getLatestMatchingReport(reports, financialStatementPatterns);
+    const monthlyDiagnostics = selectReportByRank(
+      reports,
+      normalizedSymbol,
+      'monthly-activity',
+      options.requestedIssuerName
+    );
+    const financialDiagnostics = selectReportByRank(
+      reports,
+      normalizedSymbol,
+      'financial-statement',
+      options.requestedIssuerName
+    );
+    const monthlyActivityReport = reportFromSelectionDiagnostics(monthlyDiagnostics);
+    const financialStatementReport = reportFromSelectionDiagnostics(financialDiagnostics);
+    const diagnostics: CodalDiscoveryDiagnostics = {
+      requestedSymbol: normalizedSymbol,
+      requestedIssuerName: options.requestedIssuerName,
+      monthlyActivity: monthlyDiagnostics,
+      financialStatement: financialDiagnostics
+    };
 
     return {
       status: monthlyActivityReport || financialStatementReport ? 'found' : 'not-found',
       symbol: normalizedSymbol,
       monthlyActivityReport,
       financialStatementReport,
+      diagnostics,
+      errorMessage:
+        monthlyActivityReport || financialStatementReport
+          ? undefined
+          : 'برای این نماد گزارش قابل اتکایی با تطبیق نماد/ناشر پیدا نشد.',
       sourceVerified: false,
       checkedAt
     };
@@ -957,6 +1197,7 @@ function normalizeDetailFromBody(
         publishedAt: report?.publishedAt,
         tracingNo: report?.tracingNo,
         reportId: report?.reportId,
+        selectionDiagnostics: report?.selectionDiagnostics,
         contentType: normalizedContentType,
         rawHtml: body,
         plainTextPreview,
@@ -991,6 +1232,7 @@ function normalizeDetailFromBody(
         publishedAt: report?.publishedAt,
         tracingNo: report?.tracingNo,
         reportId: report?.reportId,
+        selectionDiagnostics: report?.selectionDiagnostics,
         contentType: normalizedContentType,
         rawJson: body,
         plainTextPreview,

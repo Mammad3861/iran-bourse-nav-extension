@@ -281,6 +281,169 @@ describe('codal-client', () => {
     expect(result.financialStatementReport?.title).toContain('صورت‌های مالی');
   });
 
+  it('prefers exact symbol reports over newer weak symbol matches', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'غدیر',
+            CompanyName: 'شرکت صنعتی وبازرگانی غدیر',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+            PublishDateTime: '2026-06-25T09:00:00'
+          },
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'سرمایه گذاری غدیر',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/02/31',
+            PublishDateTime: '2026-05-25T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وغدیر', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.monthlyActivityReport?.symbol).toBe('وغدیر');
+    expect(result.monthlyActivityReport?.publishedAt).toBe('2026-05-25T09:00:00');
+    expect(result.diagnostics?.monthlyActivity?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rejectedReasons: expect.arrayContaining(['نماد گزارش با نماد درخواست‌شده تطبیق ندارد.'])
+        })
+      ])
+    );
+  });
+
+  it('does not select a suspicious subsidiary portfolio report when issuer metadata differs', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'شرکت صنعتی وبازرگانی غدیر',
+            Title: 'صورت وضعیت پورتفوی دوره 3 ماهه منتهی به 1405/03/31 (شرکت صنعتی وبازرگانی غدیر)',
+            PublishDateTime: '2026-06-25T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وغدير', {
+      requestedIssuerName: 'سرمايه گذاري غدير هلدينگ',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('not-found');
+    expect(result.monthlyActivityReport).toBeUndefined();
+    expect(result.errorMessage).toContain('تطبیق نماد/ناشر');
+    expect(result.diagnostics?.monthlyActivity?.selectedConfidence).toBe('none');
+    expect(result.diagnostics?.monthlyActivity?.candidates[0].warnings).toEqual(
+      expect.arrayContaining([
+        'نام شرکت گزارش با ناشر تشخیص‌داده‌شده از TSETMC تطبیق قوی ندارد.',
+        'عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'
+      ])
+    );
+  });
+
+  it('selects وصندوق own monthly activity report with high confidence', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وصندوق',
+            CompanyName: 'سرمایه گذاری صندوق بازنشستگی',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+            PublishDateTime: '2026-06-25T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وصندوق', {
+      requestedIssuerName: 'سرمايه گذاري صندوق بازنشستگي',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('found');
+    expect(result.monthlyActivityReport?.symbol).toBe('وصندوق');
+    expect(result.monthlyActivityReport?.selectionDiagnostics?.selectedConfidence).toBe('high');
+    expect(result.diagnostics?.monthlyActivity?.selectedWarnings).toHaveLength(0);
+  });
+
+  it('marks clarification letters as low-confidence financial statement fallback', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'سرمایه گذاری غدیر',
+            Title: 'شفاف سازی در خصوص صورت‌های مالی سال مالی منتهی',
+            PublishDateTime: '2026-06-25T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وغدیر', {
+      requestedIssuerName: 'سرمایه گذاری غدیر',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.financialStatementReport?.title).toContain('شفاف سازی');
+    expect(result.financialStatementReport?.selectionDiagnostics?.selectedConfidence).toBe('low');
+    expect(result.diagnostics?.financialStatement?.selectedWarnings).toContain(
+      'عنوان گزارش شبیه اطلاعیه/شفاف‌سازی است و منبع اصلی مالی محسوب نمی‌شود.'
+    );
+  });
+
+  it('includes rejected candidate reasons in report selection diagnostics', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وبانک',
+            CompanyName: 'سرمایه گذاری گروه توسعه ملی',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه',
+            PublishDateTime: '2026-06-25T09:00:00'
+          },
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'سرمایه گذاری غدیر',
+            Title: 'اطلاعیه عمومی',
+            PublishDateTime: '2026-06-24T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وغدیر', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.diagnostics?.monthlyActivity?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rejectedReasons: expect.arrayContaining(['نماد گزارش با نماد درخواست‌شده تطبیق ندارد.'])
+        }),
+        expect.objectContaining({
+          rejectedReasons: expect.arrayContaining(['عنوان گزارش با نوع گزارش مورد انتظار تطبیق ندارد.'])
+        })
+      ])
+    );
+  });
+
   it('returns not-found when Codal search succeeds but has no relevant reports', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);

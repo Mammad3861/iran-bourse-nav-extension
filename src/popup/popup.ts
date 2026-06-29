@@ -14,7 +14,12 @@ import {
 } from '../data/codal-monthly-parser';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
 import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
-import { copyTextWithFallback, parserDiagnosticsJson, parserTablePreviewText } from '../ui/parser-diagnostics';
+import {
+  codalDiscoveryDiagnosticsJson,
+  copyTextWithFallback,
+  parserDiagnosticsJson,
+  parserTablePreviewText
+} from '../ui/parser-diagnostics';
 import '../ui/styles.css';
 
 function setText(selector: string, value: string): void {
@@ -32,6 +37,20 @@ function reportSummary(report: CodalReportReference | undefined): string {
   return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
 }
 
+function discoverySelectionNotice(result: CodalReportDiscoveryResult): string | undefined {
+  const selections = [result.diagnostics?.monthlyActivity, result.diagnostics?.financialStatement].filter(Boolean);
+  if (selections.some((selection) => selection?.selectedWarnings.length)) {
+    return 'گزارش انتخاب‌شده ممکن است مربوط به ناشر دیگری باشد؛ تشخیص گزارش را بررسی کنید.';
+  }
+  if (selections.some((selection) => selection?.selectedConfidence === 'high' || selection?.selectedConfidence === 'medium')) {
+    return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
+  }
+  if (result.diagnostics) {
+    return 'گزارش به دلیل عدم تطابق نماد/ناشر نادیده گرفته شد.';
+  }
+  return undefined;
+}
+
 function updateReportLink(selector: string, report: CodalReportReference | undefined): void {
   const link = document.querySelector<HTMLAnchorElement>(selector);
   if (!link) {
@@ -47,11 +66,83 @@ function updateReportLink(selector: string, report: CodalReportReference | undef
   }
 }
 
+function renderDiscoveryDiagnostics(result: CodalReportDiscoveryResult): void {
+  const container = document.querySelector<HTMLElement>('[data-popup-codal="diagnostics"]');
+  if (!container) return;
+  container.textContent = '';
+  if (!result.diagnostics) return;
+
+  const details = document.createElement('details');
+  details.className = 'ibnav-table-preview';
+  const summary = document.createElement('summary');
+  summary.textContent = 'تشخیص انتخاب گزارش کدال';
+  details.appendChild(summary);
+
+  const monthly = result.diagnostics.monthlyActivity;
+  const financial = result.diagnostics.financialStatement;
+  const meta = document.createElement('p');
+  meta.className = 'ibnav-muted';
+  meta.textContent = [
+    `نماد: ${result.diagnostics.requestedSymbol}`,
+    result.diagnostics.requestedIssuerName ? `ناشر: ${result.diagnostics.requestedIssuerName}` : undefined,
+    monthly ? `گزارش ماهانه: ${monthly.selectedConfidence}` : undefined,
+    financial ? `صورت مالی: ${financial.selectedConfidence}` : undefined
+  ]
+    .filter(Boolean)
+    .join(' | ');
+  details.appendChild(meta);
+
+  const rejected = [...(monthly?.candidates ?? []), ...(financial?.candidates ?? [])]
+    .filter((candidate) => candidate.rejectedReasons.length || candidate.warnings.length)
+    .slice(0, 6);
+  if (rejected.length) {
+    const list = document.createElement('pre');
+    list.className = 'ibnav-preview-code';
+    list.textContent = rejected
+      .map((candidate) =>
+        [
+          candidate.report.symbol,
+          candidate.report.title,
+          `score=${candidate.score.toFixed(1)}`,
+          [...candidate.rejectedReasons, ...candidate.warnings].join('، ')
+        ].join(' | ')
+      )
+      .join('\n');
+    details.appendChild(list);
+  }
+
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'ibnav-apply ibnav-secondary';
+  copyButton.textContent = 'کپی تشخیص انتخاب گزارش';
+  copyButton.addEventListener('click', async () => {
+    const outcome = await copyTextWithFallback(codalDiscoveryDiagnosticsJson(result), window.navigator.clipboard, (text) =>
+      showManualCopyFallback(details, text)
+    );
+    setText(
+      '[data-popup-suggestions="warnings"]',
+      outcome === 'copied'
+        ? 'تشخیص انتخاب گزارش کپی شد.'
+        : 'کپی خودکار انجام نشد؛ تشخیص انتخاب گزارش برای کپی دستی نمایش داده شد.'
+    );
+  });
+  details.appendChild(copyButton);
+  container.appendChild(details);
+}
+
 function renderCodalDiscovery(result: CodalReportDiscoveryResult): void {
   if (result.status === 'found') {
-    setText('[data-popup-codal="status"]', 'ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد');
+    setText(
+      '[data-popup-codal="status"]',
+      `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
+        discoverySelectionNotice(result) ? ` - ${discoverySelectionNotice(result)}` : ''
+      }`
+    );
   } else if (result.status === 'not-found') {
-    setText('[data-popup-codal="status"]', result.errorMessage ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد');
+    setText(
+      '[data-popup-codal="status"]',
+      result.errorMessage ?? discoverySelectionNotice(result) ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد'
+    );
   } else {
     setText('[data-popup-codal="status"]', `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`);
   }
@@ -60,6 +151,7 @@ function renderCodalDiscovery(result: CodalReportDiscoveryResult): void {
   setText('[data-popup-codal="financial"]', reportSummary(result.financialStatementReport));
   updateReportLink('[data-popup-codal-link="monthly"]', result.monthlyActivityReport);
   updateReportLink('[data-popup-codal-link="financial"]', result.financialStatementReport);
+  renderDiscoveryDiagnostics(result);
 }
 
 function detailStatusText(result: CodalReportDetailResult): string {

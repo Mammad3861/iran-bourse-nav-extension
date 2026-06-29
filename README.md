@@ -93,6 +93,7 @@ Limited public smoke testing on 2026-06-28 verified that:
 * Public TSETMC `/instInfo/{InsCode}` pages for sample investment/holding symbols expose ticker/header and latest/closing price text that can be parsed defensively.
 * Public Codal search returns metadata for sample symbols, but may require Persian/Arabic ticker spelling variants.
 * Codal `Length` is treated as a period filter, not a page-size limit; the client keeps it at `-1`.
+* Codal report selection now ranks candidates by exact symbol, issuer/company-name match, report type, title relevance, and publish date. Suspicious subsidiary-like matches are rejected or shown with warnings in copyable diagnostics.
 * Codal detail pages may expose portfolio tables as HTML tables, embedded JSON, or script-held row/cell data. The client now reports detected content type, table count, header previews, and parser warnings when a shape is unsupported.
 * Monthly parser diagnostics show table previews, detected labels, candidate values, units, table indexes, and confidence reasons to help users review unsupported or ambiguous Codal reports.
 * Parser extraction now preserves empty table cells for safer column alignment and supports explicit `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان` unit hints. Unclear units are shown as raw values with warnings rather than silently scaled.
@@ -137,6 +138,10 @@ After building the project:
 5. Open a supported TSETMC symbol page and check the NAV widget.
 
 ## Troubleshooting Parser Diagnostics
+
+When Codal discovery finds suspicious reports, open the NAV widget or popup and expand `تشخیص انتخاب گزارش کدال`.
+
+That diagnostics section shows candidate reports, scores, selected/rejected state, and reasons such as symbol mismatch, weak issuer match, suspicious parenthetical company names, or low-confidence clarification-letter fallback.
 
 When Codal report detail is fetched but values are not extracted, open the NAV widget or popup and expand `نمایش جزئیات تشخیص Parser`.
 

@@ -38,9 +38,15 @@ async function unwrapResponse<T>(response: CodalRuntimeResponse): Promise<T> {
   throw new Error(response.errorMessage);
 }
 
-export async function requestCodalDiscovery(symbol: string): Promise<CodalReportDiscoveryResult> {
+export async function requestCodalDiscovery(
+  symbol: string,
+  issuerName?: string
+): Promise<CodalReportDiscoveryResult> {
+  const message = issuerName
+    ? { type: 'CODAL_DISCOVER_LATEST_REPORTS' as const, symbol, issuerName }
+    : { type: 'CODAL_DISCOVER_LATEST_REPORTS' as const, symbol };
   return unwrapResponse<CodalReportDiscoveryResult>(
-    await sendCodalMessage({ type: 'CODAL_DISCOVER_LATEST_REPORTS', symbol })
+    await sendCodalMessage(message)
   );
 }
 

@@ -52,7 +52,7 @@ function invalidSymbolError(): CodalRuntimeResponse {
 
 function requestKey(message: CodalRuntimeMessage): string {
   if ('symbol' in message) {
-    return `${message.type}:${message.symbol}`;
+    return `${message.type}:${message.symbol}:${'issuerName' in message ? (message.issuerName ?? '') : ''}`;
   }
 
   return `${message.type}:${message.report.url ?? message.report.tracingNo ?? message.report.reportId ?? message.report.title}`;
@@ -81,7 +81,13 @@ async function runRequest(
         return { ok: true, data: await dependencies.getLatestFinancialStatement(validation.symbol) };
       }
 
-      return { ok: true, data: await dependencies.discoverLatestCodalReports(validation.symbol) };
+      const issuerName = 'issuerName' in message ? message.issuerName : undefined;
+      return {
+        ok: true,
+        data: issuerName
+          ? await dependencies.discoverLatestCodalReports(validation.symbol, { requestedIssuerName: issuerName })
+          : await dependencies.discoverLatestCodalReports(validation.symbol)
+      };
     }
 
     return { ok: true, data: await dependencies.getReportDetail(message.report) };

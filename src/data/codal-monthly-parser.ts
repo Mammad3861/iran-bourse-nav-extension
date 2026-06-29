@@ -2,6 +2,7 @@ import { normalizePersianArabicDigits, parseLocalizedNumber } from '../core/numb
 import {
   type CodalExtractedTable,
   type CodalReportDetail,
+  type CodalReportSelectionDiagnostics,
   isMonthlyActivityReport,
   stripUnsafeHtml
 } from './codal-client';
@@ -90,6 +91,7 @@ export interface MonthlyActivityParserDiagnostics {
   reportUrl?: string;
   tracingNo?: string;
   reportId?: string;
+  reportSelection?: CodalReportSelectionDiagnostics;
   fetchTimestamp?: string;
   detectedTableCount: number;
   parserStatus: MonthlyActivityParseResult['status'];
@@ -717,6 +719,7 @@ function buildDiagnostics(options: {
     reportUrl: options.detail.sourceUrl,
     tracingNo: options.detail.tracingNo,
     reportId: options.detail.reportId,
+    reportSelection: options.detail.selectionDiagnostics,
     fetchTimestamp: options.detail.fetchedAt,
     detectedTableCount: options.tables.length,
     parserStatus: options.status,

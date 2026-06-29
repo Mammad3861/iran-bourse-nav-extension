@@ -26,13 +26,14 @@ Any future automated source must be reviewed for legality, stability, attributio
 
 The codebase includes a small Codal search client in `src/data/codal-client.ts`.
 
-It uses the public search host currently observed at `https://search.codal.ir/api/search/v2/q` to search reports by symbol, then filters report titles to find the latest monthly activity/portfolio-status report or latest financial statement. This endpoint is not treated as an official stable API. It may change, rate-limit clients, return different JSON fields, or stop working without notice.
+It uses the public search host currently observed at `https://search.codal.ir/api/search/v2/q` to search reports by symbol, then ranks candidate reports before choosing a monthly activity/portfolio-status report or financial statement. Ranking prefers exact symbol matches, strong issuer/company-name matches when TSETMC provides an issuer name, relevant report titles, expected report types, and publish date. This endpoint is not treated as an official stable API. It may change, rate-limit clients, return different JSON fields, or stop working without notice.
 
 Live smoke testing on 2026-06-28 found:
 
 - Codal symbol search can be sensitive to Persian/Arabic letter variants, especially `ی/ي` and `ک/ك`. The client tries a small set of normalized variants and stops after the first successful result set.
 - Codal's `Length` query parameter behaves like a report-period filter, not a page-size limit. The client uses `Length=-1` to avoid unintentionally filtering out report periods while still requesting only the first result page.
 - Top search results for holding companies can include subsidiary reports or annual board activity reports. Title filtering must stay conservative and metadata should remain unverified until the user reviews it.
+- Report selection diagnostics are generated for each candidate so users can inspect score, selected/rejected state, and reasons such as symbol mismatch, weak issuer match, suspicious parenthetical company names, or clarification-letter fallback.
 
 Current safeguards:
 
@@ -40,6 +41,8 @@ Current safeguards:
 - No single report URL is hardcoded.
 - Content scripts do not call Codal endpoints directly; they ask the background service worker to perform Codal discovery/detail requests.
 - Symbols are validated before Codal search. Empty values, `TSETMC`, `InsCode:*`, unknown labels, domains, URLs, numeric-only values, and English site labels are not searched.
+- Candidate reports are ranked and can be rejected when the Codal symbol, company metadata, or title appears to reference a different issuer/subsidiary.
+- Clarification letters are not treated as strong financial-statement substitutes; if used as a fallback, they are marked low confidence in diagnostics.
 - In-flight background requests are reused per symbol/report to avoid duplicate page-load bursts.
 - Requests use a timeout and retry limit.
 - Successful responses are cached in `chrome.storage.local`.

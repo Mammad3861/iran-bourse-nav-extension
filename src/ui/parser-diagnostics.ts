@@ -1,4 +1,5 @@
 import type { MonthlyActivityParseResult, ParserTablePreview } from '../data/codal-monthly-parser';
+import type { CodalReportDiscoveryResult } from '../data/codal-client';
 
 export interface ClipboardLike {
   writeText?: (text: string) => Promise<void>;
@@ -6,6 +7,10 @@ export interface ClipboardLike {
 
 export function parserDiagnosticsJson(result: MonthlyActivityParseResult): string {
   return JSON.stringify(result.diagnostics, null, 2);
+}
+
+export function codalDiscoveryDiagnosticsJson(result: CodalReportDiscoveryResult): string {
+  return JSON.stringify(result.diagnostics ?? result, null, 2);
 }
 
 function tablePreviewMarkdown(table: ParserTablePreview): string {
