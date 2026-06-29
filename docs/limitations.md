@@ -18,13 +18,14 @@ This extension provides an estimate, not an audited valuation.
 - Reports with different Codal symbols, weak issuer metadata, or titles referencing another company in parentheses may be ignored or marked suspicious. Users should review selection diagnostics when expected reports are missing.
 - Generic clarification letters may appear in search results; they are downgraded and should not be treated as audited financial statements without manual review.
 - Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
-- Detected Codal tables may come from HTML, JSON, or script-embedded data. Row and column counts or header previews do not imply the report format is fully supported for value extraction.
+- Detected Codal tables may come from HTML, JSON, script-embedded data, or Codal cell-model arrays. Row and column counts or header previews do not imply the report format is fully supported for value extraction.
+- Codal cell-model reconstruction groups cells by meta table and rebuilds matrices from row/column coordinates or A1-style addresses. Missing coordinates, duplicate coordinates, merged-cell layouts, or unexpected row/column sequences can still produce incomplete previews or downgraded suggestions.
 - If a Codal detail page is PDF-like, empty, blocked, or shaped differently from supported table patterns, the UI should explain that no supported table was detected.
 - Unsupported Codal report formats are expected and should not block manual NAV calculations.
 - Codal monthly parser outputs are suggestions only and can be wrong when labels are ambiguous, report formats vary, units differ, numbers are malformed, or tables contain totals/subtotals in unexpected places.
 - Parser diagnostics expose raw and normalized previews of public Codal table content to help review labels, row alignment, and candidate values; the preview is not proof that the extracted value is correct.
 - Parser diagnostics are visible in the widget/popup and can be copied as JSON or compact Markdown/text table-preview output. If browser clipboard access is unavailable, the extension shows a textarea fallback for manual copy.
-- Diagnostics include public Codal report metadata, report-selection diagnostics, detected raw/normalized table headers, first raw/normalized rows, candidate labels, rejected candidates, and failure reasons. They do not include manual NAV inputs.
+- Diagnostics include public Codal report metadata, report-selection diagnostics, detected raw/normalized table headers, first raw/normalized rows, Codal cell-model reconstruction metadata when available, candidate labels, rejected candidates, and failure reasons. They do not include manual NAV inputs.
 - Numeric extraction prefers clear total rows such as `جمع`, `جمع کل`, `مجموع`, and `مانده پایان دوره`. Multiple total rows, duplicate candidates, or unclear labels are intentionally downgraded.
 - The parser recognizes explicit unit hints such as `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان`. If the unit is unclear, it keeps the raw value, adds a warning, and avoids high-confidence bulk apply.
 - The parser preserves empty cells inside detected rows to keep Codal cost/market columns aligned, but unusual merged-cell layouts can still confuse extraction.

@@ -276,6 +276,19 @@ function appendMonthlyDiagnostics(list: HTMLElement, result: MonthlyActivityPars
     item.appendChild(meta);
     const diagnostic = result.diagnostics.tables.find((diagnosticTable) => diagnosticTable.tableIndex === table.index);
     if (diagnostic) {
+      if (diagnostic.reconstruction) {
+        const reconstruction = document.createElement('p');
+        reconstruction.className = 'ibnav-muted';
+        reconstruction.textContent = [
+          'جدول بازسازی‌شده از داده سلولی کدال',
+          `تعداد سلول‌ها: ${diagnostic.reconstruction.rawCellCount}`,
+          `ابعاد جدول بازسازی‌شده: ${diagnostic.reconstruction.rowCount}×${diagnostic.reconstruction.columnCount}`,
+          `metaTableCode: ${diagnostic.reconstruction.metaTableCode ?? '-'}`,
+          `هشدار بازسازی: ${diagnostic.reconstruction.warnings.join('، ') || '-'}`
+        ].join(' | ');
+        item.appendChild(reconstruction);
+      }
+
       const details = document.createElement('p');
       details.className = 'ibnav-muted';
       details.textContent = [

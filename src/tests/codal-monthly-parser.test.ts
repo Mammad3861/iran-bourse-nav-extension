@@ -227,6 +227,53 @@ describe('parseMonthlyActivityReport', () => {
     );
   });
 
+  it('extracts suggestions from reconstructed Codal cell-model tables', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        extractedTables: [
+          {
+            index: 3,
+            source: 'codal-cell-model',
+            caption: 'SummaryOfCompanyInvestments - سرمایه گذاری های شرکت',
+            headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+            rows: [
+              ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+              ['سهام شرکت های قابل معامله پذیرفته شده در بورس', '۱۰۰', '۱۸۰'],
+              ['جمع', '۱۰۰', '۱۸۰']
+            ],
+            reconstruction: {
+              kind: 'codal-cell-model',
+              metaTableCode: '2570',
+              metaTableId: '10',
+              alias: 'SummaryOfCompanyInvestments',
+              rawCellCount: 9,
+              rowCount: 3,
+              columnCount: 3,
+              warnings: []
+            }
+          }
+        ]
+      })
+    );
+
+    expect(result.status).toBe('parsed');
+    expect(result.diagnostics.tables[0]).toEqual(
+      expect.objectContaining({
+        source: 'codal-cell-model',
+        reconstruction: expect.objectContaining({ metaTableCode: '2570', rawCellCount: 9 }),
+        normalizedHeaders: ['شرح', 'بهای تمام شده', 'ارزش بازار']
+      })
+    );
+    expect(result.diagnostics.tables[0].normalizedHeaders).not.toContain('metaTableId');
+    expect(result.diagnostics.tables[0].normalizedHeaders).not.toContain('address');
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 100, confidence: 'medium' }),
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 180, confidence: 'medium' })
+      ])
+    );
+  });
+
   it('supports Arabic digits, commas, whitespace, and parenthesized negative values', () => {
     const result = parseMonthlyActivityReport(
       detail({

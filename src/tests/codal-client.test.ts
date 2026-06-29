@@ -8,9 +8,11 @@ import {
   getReportDetail,
   getReportDetailByTracingNo,
   getReportDetailByUrl,
+  groupCellsByMetaTableCode,
   isFinancialStatementReport,
   isMonthlyActivityReport,
   isPortfolioReport,
+  reconstructCodalCellTable,
   searchReportsBySymbol
 } from '../data/codal-client';
 
@@ -634,6 +636,174 @@ describe('codal-client', () => {
         headers: ['شرح', 'بهای تمام شده', 'ارزش روز']
       })
     );
+  });
+
+  it('groups and reconstructs Codal cell-model rows by metaTableCode', () => {
+    const cells = [
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'A1',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 1,
+        columnSequence: 1,
+        value: 'شرح',
+        valueTypeName: 'String',
+        dataTypeName: 'Text'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'B1',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 1,
+        columnSequence: 2,
+        value: 'بهای تمام شده'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'C1',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 1,
+        columnSequence: 3,
+        value: 'ارزش بازار'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'A2',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 2,
+        columnSequence: 1,
+        value: 'سهام شرکت های قابل معامله'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'B2',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 2,
+        columnSequence: 2,
+        value: '۱۰۰'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'C2',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 2,
+        columnSequence: 3,
+        value: '۱۸۰'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'A3',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 3,
+        columnSequence: 1,
+        value: 'جمع'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'B3',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 3,
+        columnSequence: 2,
+        value: '۱۰۰'
+      },
+      {
+        metaTableId: 10,
+        metaTableCode: 2570,
+        address: 'C3',
+        cellGroupName: 'SummaryOfCompanyInvestments',
+        rowSequence: 3,
+        columnSequence: 3,
+        value: '۱۸۰'
+      },
+      {
+        metaTableId: 11,
+        metaTableCode: 3000,
+        address: 'A1',
+        cellGroupName: 'OtherTable',
+        rowSequence: 1,
+        columnSequence: 1,
+        value: 'جدول دیگر'
+      }
+    ];
+
+    const groups = groupCellsByMetaTableCode(cells);
+    expect(groups.size).toBe(2);
+    const table2570 = reconstructCodalCellTable(groups.get('2570:10') ?? []);
+
+    expect(table2570).toEqual(
+      expect.objectContaining({
+        source: 'codal-cell-model',
+        headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+        rows: expect.arrayContaining([
+          ['سهام شرکت های قابل معامله', '100', '180'],
+          ['جمع', '100', '180']
+        ]),
+        reconstruction: expect.objectContaining({
+          metaTableCode: '2570',
+          metaTableId: '10',
+          rawCellCount: 9,
+          rowCount: 3,
+          columnCount: 3
+        })
+      })
+    );
+  });
+
+  it('detects Codal cell-model JSON as reconstructed report matrices instead of technical field tables', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const payload = {
+      cells: [
+        { metaTableId: 10, metaTableCode: 2570, address: 'A1', cellGroupName: 'SummaryOfCompanyInvestments', rowSequence: 1, columnSequence: 1, value: 'شرح' },
+        { metaTableId: 10, metaTableCode: 2570, address: 'B1', cellGroupName: 'SummaryOfCompanyInvestments', rowSequence: 1, columnSequence: 2, value: 'بهای تمام شده' },
+        { metaTableId: 10, metaTableCode: 2570, address: 'C1', cellGroupName: 'SummaryOfCompanyInvestments', rowSequence: 1, columnSequence: 3, value: 'ارزش روز' },
+        { metaTableId: 10, metaTableCode: 2570, address: 'A2', cellGroupName: 'SummaryOfCompanyInvestments', rowSequence: 2, columnSequence: 1, value: 'جمع' },
+        { metaTableId: 10, metaTableCode: 2570, address: 'B2', cellGroupName: 'SummaryOfCompanyInvestments', rowSequence: 2, columnSequence: 2, value: '۱۰۰' },
+        { metaTableId: 10, metaTableCode: 2570, address: 'C2', cellGroupName: 'SummaryOfCompanyInvestments', rowSequence: 2, columnSequence: 3, value: '۱۸۰' }
+      ]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(detailResponse(payload, 'application/json'));
+
+    const result = await getReportDetailByUrl('https://www.codal.ir/Reports/Decision.aspx?LetterSerial=cells', {
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('fetched');
+    expect(result.detail?.extractedTables[0]).toEqual(
+      expect.objectContaining({
+        source: 'codal-cell-model',
+        headers: ['شرح', 'بهای تمام شده', 'ارزش روز'],
+        rows: [
+          ['شرح', 'بهای تمام شده', 'ارزش روز'],
+          ['جمع', '100', '180']
+        ],
+        reconstruction: expect.objectContaining({ metaTableCode: '2570', rawCellCount: 6 })
+      })
+    );
+    expect(result.detail?.tables[0].headers).not.toContain('metaTableId');
+    expect(result.detail?.tables[0].headers).not.toContain('address');
+    expect(result.detail?.tables[0].headers).toContain('بهای تمام شده');
+  });
+
+  it('reports duplicate and missing coordinates while reconstructing Codal cell-model tables', () => {
+    const table = reconstructCodalCellTable([
+      { metaTableId: 10, metaTableCode: 2570, address: 'A1', cellGroupName: 'SummaryOfCompanyInvestments', value: 'شرح' },
+      { metaTableId: 10, metaTableCode: 2570, address: 'B1', cellGroupName: 'SummaryOfCompanyInvestments', value: 'بهای تمام شده' },
+      { metaTableId: 10, metaTableCode: 2570, address: 'B1', cellGroupName: 'SummaryOfCompanyInvestments', value: 'مبلغ تمام شده' },
+      { metaTableId: 10, metaTableCode: 2570, cellGroupName: 'SummaryOfCompanyInvestments', value: 'بدون مختصات' }
+    ]);
+
+    expect(table?.rows[0]).toEqual(['شرح', 'بهای تمام شده مبلغ تمام شده']);
+    expect(table?.reconstruction?.warnings.join(' ')).toContain('skipped');
+    expect(table?.reconstruction?.warnings.join(' ')).toContain('Duplicate');
   });
 
   it('constructs a report detail URL from tracing number metadata', async () => {

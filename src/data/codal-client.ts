@@ -68,14 +68,27 @@ export interface CodalTableMetadata {
   caption?: string;
   source?: CodalExtractedTable['source'];
   headersPreview?: string[];
+  reconstruction?: CodalCellTableReconstructionMetadata;
+}
+
+export interface CodalCellTableReconstructionMetadata {
+  kind: 'codal-cell-model';
+  metaTableCode?: string;
+  metaTableId?: string;
+  alias?: string;
+  rawCellCount: number;
+  rowCount: number;
+  columnCount: number;
+  warnings: string[];
 }
 
 export interface CodalExtractedTable {
   index: number;
-  source: 'html-table' | 'html-row-structure' | 'script-json' | 'json';
+  source: 'html-table' | 'html-row-structure' | 'script-json' | 'json' | 'codal-cell-model';
   caption?: string;
   headers: string[];
   rows: string[][];
+  reconstruction?: CodalCellTableReconstructionMetadata;
 }
 
 export interface CodalReportDetail {
@@ -633,6 +646,223 @@ function isPrimitiveCell(value: unknown): boolean {
   return ['string', 'number', 'boolean'].includes(typeof value) || value === null;
 }
 
+function firstDefined(record: Record<string, unknown>, keys: string[]): unknown {
+  return keys.map((key) => record[key]).find((value) => value !== undefined && value !== null);
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  const normalized = normalizeCell(firstDefined(record, keys));
+  return normalized || undefined;
+}
+
+function numericCoordinate(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  const normalized = normalizeCell(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  const parsed = Number(normalized.replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function columnIndexFromAddress(address: string): number | undefined {
+  const match = normalizeCell(address).match(/^([A-Z]+)\d+$/i);
+  if (!match) {
+    return undefined;
+  }
+
+  return [...match[1].toUpperCase()].reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0) - 1;
+}
+
+function rowIndexFromAddress(address: string): number | undefined {
+  const match = normalizeCell(address).match(/^[A-Z]+(\d+)$/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed - 1 : undefined;
+}
+
+function isCodalCellModelRecord(record: Record<string, unknown>): boolean {
+  return (
+    'value' in record &&
+    ('address' in record || 'rowSequence' in record || 'columnSequence' in record) &&
+    ('cellGroupName' in record || 'metaTableCode' in record || 'metaTableId' in record)
+  );
+}
+
+function headerRowFromMatrix(rows: string[][]): string[] {
+  return rows.find((row) => row.filter(Boolean).length >= 2) ?? rows[0] ?? [];
+}
+
+function captionFromCellGroup(cells: Record<string, unknown>[]): string | undefined {
+  const aliases = [
+    ...new Set(
+      cells
+        .map((cell) =>
+          firstString(cell, [
+            'alias',
+            'Alias',
+            'title',
+            'Title',
+            'tableTitle',
+            'TableTitle',
+            'metaTableTitle',
+            'MetaTableTitle',
+            'cellGroupName',
+            'CellGroupName'
+          ])
+        )
+        .filter((value): value is string => Boolean(value))
+    )
+  ];
+  return aliases.join(' - ') || undefined;
+}
+
+export function groupCellsByMetaTableCode(cells: unknown[]): Map<string, Record<string, unknown>[]> {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const cell of cells) {
+    if (!cell || typeof cell !== 'object' || Array.isArray(cell)) {
+      continue;
+    }
+
+    const record = cell as Record<string, unknown>;
+    if (!isCodalCellModelRecord(record)) {
+      continue;
+    }
+
+    const metaTableCode = firstString(record, ['metaTableCode', 'MetaTableCode']);
+    const metaTableId = firstString(record, ['metaTableId', 'MetaTableId']);
+    const key = `${metaTableCode ?? 'unknown-code'}:${metaTableId ?? 'unknown-id'}`;
+    const group = groups.get(key) ?? [];
+    group.push(record);
+    groups.set(key, group);
+  }
+  return groups;
+}
+
+export function reconstructCodalCellTable(
+  cells: Record<string, unknown>[],
+  index = 0
+): CodalExtractedTable | undefined {
+  if (cells.length === 0) {
+    return undefined;
+  }
+
+  const warnings: string[] = [];
+  const rowCoordinates = new Map<Record<string, unknown>, number>();
+  const columnCoordinates = new Map<Record<string, unknown>, number>();
+  const rowValues = new Set<number>();
+  const columnValues = new Set<number>();
+  let missingCoordinateCount = 0;
+
+  for (const cell of cells) {
+    const address = firstString(cell, ['address', 'Address']);
+    const row =
+      numericCoordinate(firstDefined(cell, ['rowSequence', 'RowSequence', 'row', 'Row', 'rowIndex', 'RowIndex'])) ??
+      (address ? rowIndexFromAddress(address) : undefined);
+    const column =
+      numericCoordinate(
+        firstDefined(cell, ['columnSequence', 'ColumnSequence', 'column', 'Column', 'columnIndex', 'ColumnIndex'])
+      ) ?? (address ? columnIndexFromAddress(address) : undefined);
+
+    if (row === undefined || column === undefined) {
+      missingCoordinateCount += 1;
+      continue;
+    }
+
+    rowCoordinates.set(cell, row);
+    columnCoordinates.set(cell, column);
+    rowValues.add(row);
+    columnValues.add(column);
+  }
+
+  if (rowValues.size === 0 || columnValues.size === 0) {
+    return undefined;
+  }
+
+  if (missingCoordinateCount > 0) {
+    warnings.push(`${missingCoordinateCount} Codal cell(s) were skipped because row/column coordinates were missing.`);
+  }
+
+  const sortedRows = [...rowValues].sort((left, right) => left - right);
+  const sortedColumns = [...columnValues].sort((left, right) => left - right);
+  const rowIndexByCoordinate = new Map(sortedRows.map((coordinate, rowIndex) => [coordinate, rowIndex]));
+  const columnIndexByCoordinate = new Map(sortedColumns.map((coordinate, columnIndex) => [coordinate, columnIndex]));
+  const matrix = Array.from({ length: sortedRows.length }, () => Array.from({ length: sortedColumns.length }, () => ''));
+  const duplicateCoordinates: string[] = [];
+
+  for (const cell of cells) {
+    const row = rowCoordinates.get(cell);
+    const column = columnCoordinates.get(cell);
+    if (row === undefined || column === undefined) {
+      continue;
+    }
+
+    const rowIndex = rowIndexByCoordinate.get(row);
+    const columnIndex = columnIndexByCoordinate.get(column);
+    if (rowIndex === undefined || columnIndex === undefined) {
+      continue;
+    }
+
+    const value = normalizeCell(firstDefined(cell, ['value', 'Value', 'text', 'Text', 'cellValue', 'CellValue']));
+    if (matrix[rowIndex][columnIndex] && value) {
+      duplicateCoordinates.push(`${row}:${column}`);
+      matrix[rowIndex][columnIndex] = `${matrix[rowIndex][columnIndex]} ${value}`.trim();
+    } else {
+      matrix[rowIndex][columnIndex] = value;
+    }
+  }
+
+  if (duplicateCoordinates.length > 0) {
+    warnings.push(`Duplicate Codal cell coordinate(s) were merged: ${[...new Set(duplicateCoordinates)].join(', ')}.`);
+  }
+
+  const rows = matrix.filter((row) => row.some(Boolean));
+  if (rows.length === 0) {
+    return undefined;
+  }
+
+  const firstCell = cells[0] ?? {};
+  const metaTableCode = firstString(firstCell, ['metaTableCode', 'MetaTableCode']);
+  const metaTableId = firstString(firstCell, ['metaTableId', 'MetaTableId']);
+  const alias = captionFromCellGroup(cells);
+  const headers = headerRowFromMatrix(rows);
+  const reconstruction: CodalCellTableReconstructionMetadata = {
+    kind: 'codal-cell-model',
+    metaTableCode,
+    metaTableId,
+    alias,
+    rawCellCount: cells.length,
+    rowCount: rows.length,
+    columnCount: rows.reduce((max, row) => Math.max(max, row.length), 0),
+    warnings
+  };
+  const fallbackCaption = [metaTableCode ? `metaTableCode ${metaTableCode}` : undefined, metaTableId ? `metaTableId ${metaTableId}` : undefined]
+    .filter(Boolean)
+    .join(' / ');
+
+  return {
+    index,
+    source: 'codal-cell-model',
+    caption: alias ?? fallbackCaption,
+    headers,
+    rows,
+    reconstruction
+  };
+}
+
+function reconstructCodalCellTables(cells: unknown[], startIndex: number): CodalExtractedTable[] {
+  return [...groupCellsByMetaTableCode(cells).values()]
+    .map((group, offset) => reconstructCodalCellTable(group, startIndex + offset))
+    .filter((table): table is CodalExtractedTable => Boolean(table));
+}
+
 function rowsFromHtmlTable(tableHtml: string): string[][] {
   return Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi))
     .map((row) => {
@@ -651,7 +881,8 @@ function tableMetadataFromExtractedTables(tables: CodalExtractedTable[]): CodalT
     headers: table.headers,
     caption: table.caption,
     source: table.source,
-    headersPreview: table.headers.slice(0, 6)
+    headersPreview: table.headers.slice(0, 6),
+    reconstruction: table.reconstruction
   }));
 }
 
@@ -705,6 +936,10 @@ function extractRepeatedHtmlRowStructures(html: string, startIndex: number): Cod
 }
 
 function primitiveRowsFromArray(items: unknown[]): string[][] {
+  if (reconstructCodalCellTables(items, 0).length > 0) {
+    return [];
+  }
+
   if (items.every(Array.isArray)) {
     return items
       .map((row) => (row as unknown[]).filter(isPrimitiveCell).map(normalizeCell))
@@ -795,6 +1030,9 @@ function rowsFromTableRecord(record: Record<string, unknown>): string[][] {
     | unknown[]
     | undefined;
   if (cells) {
+    if (reconstructCodalCellTables(cells, 0).length > 0) {
+      return [];
+    }
     return rowsFromCells(cells);
   }
 
@@ -820,6 +1058,12 @@ function extractJsonTableObjects(payload: unknown, source: CodalExtractedTable['
     seen.add(value);
 
     if (Array.isArray(value)) {
+      const reconstructedTables = reconstructCodalCellTables(value, tables.length);
+      if (reconstructedTables.length > 0) {
+        tables.push(...reconstructedTables.map((table, offset) => ({ ...table, index: tables.length + offset })));
+        return;
+      }
+
       const rows = primitiveRowsFromArray(value);
       if (rows.length >= 2 && rows.reduce((max, row) => Math.max(max, row.length), 0) >= 2) {
         tables.push({

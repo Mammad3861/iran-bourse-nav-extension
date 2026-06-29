@@ -65,7 +65,11 @@ The Codal client can fetch a discovered report detail page by URL, report id, or
 - Parser warnings when a response is empty, PDF-like, unsupported JSON, or has no supported table shape.
 - Fetch timestamp.
 
-The parser foundation is intentionally conservative. It strips scripts/styles before text extraction and detects table-like structures without relying on a single CSS selector. Supported detail shapes include regular HTML `<table>` elements, limited repeated row/cell HTML structures, JSON table arrays, JSON cell arrays, and script-embedded JSON table data. Unsupported shapes are reported as safe warnings instead of guessed values.
+The parser foundation is intentionally conservative. It strips scripts/styles before text extraction and detects table-like structures without relying on a single CSS selector. Supported detail shapes include regular HTML `<table>` elements, limited repeated row/cell HTML structures, JSON table arrays, JSON cell arrays, script-embedded JSON table data, and Codal cell-model arrays.
+
+Some Codal details expose report data as a technical cell model with fields such as `metaTableCode`, `metaTableId`, `address`, `rowSequence`, `columnSequence`, `cellGroupName`, and `value`. The client groups those cells by meta table, reconstructs a matrix from row/column coordinates or A1-style addresses, and records reconstruction metadata such as raw cell count, reconstructed dimensions, meta table id/code, and coordinate warnings. The monthly parser uses the reconstructed matrix so technical fields like `metaTableId` and `address` are not treated as business headers.
+
+Unsupported shapes are reported as safe warnings instead of guessed values.
 
 ## Limited Monthly Activity Parser
 
@@ -87,6 +91,7 @@ For detected tables, the parser also exposes diagnostics for review:
 - A normalized text preview.
 - Detected Persian labels and parser warnings.
 - Candidate value row/column indexes and a confidence reason.
+- Reconstruction metadata for Codal cell-model tables, including cell count, row/column dimensions, metaTable code/id, and coordinate warnings.
 
 These values are suggestions only. The widget can copy supported suggestions into manual fields only after the user clicks an explicit apply action. No parsed value is applied automatically, and no parsed value is used for NAV calculation unless the user manually accepts or edits it.
 

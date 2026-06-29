@@ -1,5 +1,6 @@
 import { normalizePersianArabicDigits, parseLocalizedNumber } from '../core/number-utils';
 import {
+  type CodalCellTableReconstructionMetadata,
   type CodalExtractedTable,
   type CodalReportDetail,
   type CodalReportSelectionDiagnostics,
@@ -44,6 +45,8 @@ export interface ParserTablePreview {
   index: number;
   caption?: string;
   detectedUnit?: string;
+  source?: CodalExtractedTable['source'];
+  reconstruction?: CodalCellTableReconstructionMetadata;
   rawHeaders: string[];
   normalizedHeaders: string[];
   rawRows: string[][];
@@ -71,6 +74,8 @@ export interface ParserTableDiagnostics {
   tableIndex: number;
   caption?: string;
   detectedUnit?: string;
+  source?: CodalExtractedTable['source'];
+  reconstruction?: CodalCellTableReconstructionMetadata;
   rawHeaders: string[];
   normalizedHeaders: string[];
   firstRawRows: string[][];
@@ -123,6 +128,8 @@ export interface MonthlyActivityParseResult {
 interface ParsedTable {
   index: number;
   caption?: string;
+  source?: CodalExtractedTable['source'];
+  reconstruction?: CodalCellTableReconstructionMetadata;
   rawRows: string[][];
   rows: string[][];
 }
@@ -214,11 +221,19 @@ function normalizeRow(row: string[]): string[] {
   return row.map((cell) => normalizeText(String(cell)));
 }
 
-function parsedTableFromRows(index: number, rawRows: string[][], caption?: string): ParsedTable {
+function parsedTableFromRows(
+  index: number,
+  rawRows: string[][],
+  caption?: string,
+  source?: CodalExtractedTable['source'],
+  reconstruction?: CodalCellTableReconstructionMetadata
+): ParsedTable {
   const normalizedCaption = caption ? normalizeText(caption) : undefined;
   return {
     index,
     caption: normalizedCaption,
+    source,
+    reconstruction,
     rawRows: rawRows.map((row) => row.map((cell) => String(cell))),
     rows: rawRows.map(normalizeRow).filter((row) => row.some(Boolean))
   };
@@ -254,7 +269,7 @@ function tablesFromHtml(html: string): ParsedTable[] {
       const rawRows = Array.from(tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi))
         .map((rowMatch) => cellsFromRow(rowMatch[1]))
         .filter((row) => row.length > 0);
-      return parsedTableFromRows(index, rawRows, captionMatch ? rawTextFromHtml(captionMatch[1]) : undefined);
+      return parsedTableFromRows(index, rawRows, captionMatch ? rawTextFromHtml(captionMatch[1]) : undefined, 'html-table');
     }
   );
 }
@@ -292,7 +307,8 @@ function tablesFromJson(rawJson: unknown): ParsedTable[] {
         [headers, ...rows.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell)) : []))].filter(
           (row) => row.length > 0
         ),
-        typeof table.title === 'string' ? table.title : typeof table.caption === 'string' ? table.caption : undefined
+        typeof table.title === 'string' ? table.title : typeof table.caption === 'string' ? table.caption : undefined,
+        'json'
       );
     })
     .filter((table): table is ParsedTable => Boolean(table));
@@ -302,7 +318,13 @@ function tablesFromExtractedTables(tables: CodalExtractedTable[] | undefined): P
   return (tables ?? [])
     .map((table): ParsedTable => {
       const rows = table.rows.length > 0 ? table.rows : [table.headers];
-      return parsedTableFromRows(table.index, rows.map((row) => row.map((cell) => String(cell))), table.caption);
+      return parsedTableFromRows(
+        table.index,
+        rows.map((row) => row.map((cell) => String(cell))),
+        table.caption,
+        table.source,
+        table.reconstruction
+      );
     })
     .filter((table) => table.rows.length > 0);
 }
@@ -404,6 +426,8 @@ function tablePreview(table: ParsedTable): ParserTablePreview {
     index: table.index,
     caption: table.caption,
     detectedUnit: unitInfoForText(text).unit,
+    source: table.source,
+    reconstruction: table.reconstruction,
     rawHeaders,
     normalizedHeaders,
     rawRows,
@@ -682,6 +706,8 @@ function tableDiagnostics(table: ParsedTable): ParserTableDiagnostics {
     tableIndex: table.index,
     caption: table.caption,
     detectedUnit: unitInfo.unit,
+    source: table.source,
+    reconstruction: table.reconstruction,
     rawHeaders,
     normalizedHeaders,
     firstRawRows: table.rawRows.slice(0, 10).map((row) => row.slice(0, 12)),

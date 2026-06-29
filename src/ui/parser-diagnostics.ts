@@ -22,9 +22,14 @@ function tablePreviewMarkdown(table: ParserTablePreview, diagnostics?: ParserTab
   const rows = diagnostics?.firstNormalizedRows.length ? diagnostics.firstNormalizedRows : table.normalizedRows;
   const rawHeaders = diagnostics?.rawHeaders.length ? diagnostics.rawHeaders : table.rawHeaders;
   const failureReasons = diagnostics?.failureReasons ?? table.warnings;
+  const reconstruction = diagnostics?.reconstruction ?? table.reconstruction;
   const lines = [
     `### جدول ${table.index}${table.caption ? ` - ${table.caption}` : ''}`,
     `واحد: ${table.detectedUnit ?? 'نامشخص'}`,
+    reconstruction
+      ? `بازسازی: مدل سلولی کدال | سلول‌ها: ${reconstruction.rawCellCount} | ابعاد: ${reconstruction.rowCount}×${reconstruction.columnCount} | metaTableCode: ${reconstruction.metaTableCode ?? '-'}`
+      : `منبع: ${table.source ?? 'نامشخص'}`,
+    reconstruction?.warnings.length ? `هشدار بازسازی: ${reconstruction.warnings.join('، ')}` : undefined,
     `برچسب‌ها: ${table.detectedLabels.join('، ') || 'نامشخص'}`,
     `دلیل عدم استخراج: ${failureReasons.join('، ') || '-'}`,
     '',
@@ -32,7 +37,7 @@ function tablePreviewMarkdown(table: ParserTablePreview, diagnostics?: ParserTab
     `ستون‌ها (normalized): ${headers.join(' | ') || '-'}`,
     '',
     ...rows.slice(0, 5).map((row, index) => `${index + 1}. ${row.join(' | ')}`)
-  ];
+  ].filter((line): line is string => line !== undefined);
   return lines.join('\n');
 }
 
