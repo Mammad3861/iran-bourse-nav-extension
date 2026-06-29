@@ -34,6 +34,8 @@ Observed on a live TSETMC instrument page such as `https://www.tsetmc.com/instIn
 - Current TSETMC symbol pages use `/instInfo/{InsCode}` URLs, so the URL alone usually provides an InsCode, not the ticker symbol.
 - The ticker symbol is more reliably found in the header pattern like `Company Name (SYMBOL)`.
 - Price rows can be compact with no separator, for example `آخرین معامله1,255...` and `قیمت پایانی1,256...`; parsers must read the first number after a known label.
+- Price detection must tokenize numeric candidates instead of parsing whole panels. Whole-panel parsing can concatenate values such as `17,070 16,090` into an invalid number.
+- Latest trade (`آخرین معامله`) is preferred over closing price (`قیمت پایانی`). If neither label yields one reliable value, the extension leaves price manual instead of guessing.
 - TSETMC pages include large AG Grid style blocks in text content, so broad page-text parsing can pick up unrelated numbers.
 - `https://cdn.tsetmc.com/api` may be blocked by the browser, profile extensions, network policy, or endpoint changes; DOM fallback and manual price entry must remain available.
 

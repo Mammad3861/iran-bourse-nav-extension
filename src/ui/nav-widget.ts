@@ -102,6 +102,22 @@ function reportSummary(report: CodalReportReference | undefined): string {
   return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
 }
 
+function currentPriceSourceText(source: ManualOverrideRecord['currentPriceSource']): string {
+  if (source === 'dom-latest-trade' || source === 'api-latest-trade' || source === 'page') {
+    return 'قیمت فعلی: خوانده‌شده از آخرین معامله';
+  }
+  if (source === 'dom-closing-price' || source === 'api-closing-price') {
+    return 'قیمت فعلی: خوانده‌شده از قیمت پایانی';
+  }
+  return 'قیمت فعلی قابل تشخیص نبود؛ در صورت نیاز دستی وارد کنید';
+}
+
+function detectedPriceSource(options: NavWidgetOptions): ManualOverrideRecord['currentPriceSource'] {
+  return options.currentPrice !== undefined && options.currentPriceSource !== 'manual'
+    ? options.currentPriceSource
+    : 'unknown';
+}
+
 function updateReportLink(root: HTMLElement, selector: string, report: CodalReportReference | undefined): void {
   const link = root.querySelector<HTMLAnchorElement>(selector);
   if (!link) {
@@ -498,11 +514,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         </div>
         <p class="ibnav-warning">منبع کدال در این نسخه تأییدشده و پایدار فرض نمی‌شود؛ محاسبه NAV همچنان فقط از ورودی‌های دستی انجام می‌شود.</p>
       </section>
-      <p class="ibnav-muted">قیمت فعلی: ${
-        options.currentPriceSource === 'page'
-          ? 'خوانده‌شده از صفحه'
-          : 'از صفحه تشخیص داده نشد؛ در صورت نیاز دستی وارد کنید'
-      }</p>
+      <p class="ibnav-muted">${currentPriceSourceText(detectedPriceSource(options))}</p>
       <p class="ibnav-warning">این خروجی فقط یک برآورد محلی است و توصیه سرمایه‌گذاری محسوب نمی‌شود.</p>
     </div>
   `;

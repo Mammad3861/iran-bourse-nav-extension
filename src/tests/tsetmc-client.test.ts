@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   detectCurrentTsetmcSymbol,
   detectInsCodeFromUrl,
+  extractCurrentPriceFromTsetmcDom,
+  extractPriceCandidatesFromText,
   getInstrumentInfoByInsCode,
   getLatestPriceByInsCode,
   readClosingPriceFromDocument,
@@ -300,6 +302,81 @@ describe('tsetmc-client', () => {
 
     expect(readCurrentPriceFromDocument(documentMock)).toBe(1255);
     expect(readClosingPriceFromDocument(documentMock)).toBe(1256);
+  });
+
+  it('extracts a single standalone price token without concatenating', () => {
+    const extracted = extractPriceCandidatesFromText('16090', 'dom-selector');
+
+    expect(extracted.candidates).toEqual([expect.objectContaining({ value: 16090 })]);
+  });
+
+  it('does not concatenate multiple price-like tokens in one text block', () => {
+    const extracted = extractPriceCandidatesFromText('17070 16090', 'dom-selector');
+
+    expect(extracted.candidates.map((candidate) => candidate.value)).toEqual([17070, 16090]);
+    expect(extracted.candidates).not.toEqual([expect.objectContaining({ value: 1707016090 })]);
+  });
+
+  it('rejects InsCode-length numeric candidates as prices', () => {
+    const extracted = extractPriceCandidatesFromText('37204371816016200', 'dom-selector');
+
+    expect(extracted.candidates).toHaveLength(0);
+    expect(extracted.rejectedCandidates[0].rejectedReason).toContain('InsCode');
+  });
+
+  it('prefers labeled latest trade over closing price in mixed panels', () => {
+    const nodes = [
+      {
+        textContent: 'قیمت پایانی17,070 آخرین معامله16,090 قیمت دیروز17,200'
+      }
+    ];
+    const documentMock = {
+      querySelectorAll: vi.fn(() => nodes),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    const result = extractCurrentPriceFromTsetmcDom(documentMock);
+
+    expect(result.selected).toEqual(
+      expect.objectContaining({
+        value: 16090,
+        source: 'dom-latest-trade'
+      })
+    );
+    expect(readCurrentPriceFromDocument(documentMock)).toBe(16090);
+  });
+
+  it('uses closing price only as a fallback when latest trade is unavailable', () => {
+    const rows = [{ textContent: 'قیمت پایانی17,070 قیمت دیروز17,200' }];
+    const documentMock = {
+      querySelectorAll: vi.fn(() => rows),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    const result = extractCurrentPriceFromTsetmcDom(documentMock);
+
+    expect(result.selected).toEqual(
+      expect.objectContaining({
+        value: 17070,
+        source: 'dom-closing-price'
+      })
+    );
+  });
+
+  it('does not choose a value from an unrelated numeric panel', () => {
+    const rows = [{ textContent: '37204371816016200 17070 16090 124 3.2' }];
+    const documentMock = {
+      querySelectorAll: vi.fn(() => rows),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    expect(extractCurrentPriceFromTsetmcDom(documentMock).selected).toBeUndefined();
+    expect(readCurrentPriceFromDocument(documentMock)).toBeUndefined();
+  });
+
+  it('parses Persian and Arabic digit price candidates with comma separators', () => {
+    expect(extractPriceCandidatesFromText('۱۶,۰۹۰', 'dom-selector').candidates[0].value).toBe(16090);
+    expect(extractPriceCandidatesFromText('١٦٬٠٩٠', 'dom-selector').candidates[0].value).toBe(16090);
   });
 
   it('returns undefined price when no reliable price exists', () => {

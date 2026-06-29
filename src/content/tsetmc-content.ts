@@ -1,5 +1,6 @@
 import { setActiveSymbol } from '../data/cache-store';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
+import type { ManualOverrideRecord } from '../data/manual-overrides';
 import {
   getInstrumentInfoByInsCode,
   getLatestPriceByInsCode,
@@ -15,6 +16,7 @@ async function boot(): Promise<void> {
   let codalSymbol = snapshot.codalSymbol;
   let instrumentName = snapshot.instrumentName;
   let currentPrice = snapshot.currentPrice;
+  let currentPriceSource: ManualOverrideRecord['currentPriceSource'] = snapshot.currentPriceSource;
 
   if (snapshot.insCode) {
     try {
@@ -38,6 +40,12 @@ async function boot(): Promise<void> {
           fallbackDocument: document
         });
         currentPrice = price.lastTradePrice ?? price.closingPrice;
+        currentPriceSource =
+          price.source === 'api' && price.lastTradePrice !== undefined
+            ? 'api-latest-trade'
+            : price.source === 'api' && price.closingPrice !== undefined
+              ? 'api-closing-price'
+              : currentPriceSource;
       } catch {
         // Manual price entry remains available.
       }
@@ -53,7 +61,7 @@ async function boot(): Promise<void> {
     codalSymbol,
     instrumentName,
     currentPrice,
-    currentPriceSource: currentPrice ? 'page' : 'unknown'
+    currentPriceSource: currentPrice ? currentPriceSource : 'unknown'
   });
 }
 

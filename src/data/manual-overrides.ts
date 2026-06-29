@@ -15,7 +15,14 @@ export interface ManualValueSourceMetadata {
 export interface ManualOverrideRecord {
   symbol: string;
   inputs: NavInputs;
-  currentPriceSource: 'page' | 'manual' | 'unknown';
+  currentPriceSource:
+    | 'page'
+    | 'dom-latest-trade'
+    | 'dom-closing-price'
+    | 'api-latest-trade'
+    | 'api-closing-price'
+    | 'manual'
+    | 'unknown';
   updatedAt: string;
   fieldSources?: Partial<Record<keyof NavInputs, ManualValueSourceMetadata>>;
 }

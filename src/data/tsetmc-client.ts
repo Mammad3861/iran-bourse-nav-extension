@@ -49,8 +49,28 @@ export interface TsetmcPageSnapshot {
   insCode?: string;
   symbolSource: SymbolDetectionResult['source'];
   currentPrice?: number;
+  currentPriceSource: 'dom-latest-trade' | 'dom-closing-price' | 'unknown';
   closingPrice?: number;
   capturedAt: string;
+}
+
+export type TsetmcDomPriceSource = 'dom-latest-trade' | 'dom-closing-price' | 'dom-selector';
+
+export interface TsetmcPriceCandidate {
+  value?: number;
+  rawText: string;
+  source: TsetmcDomPriceSource;
+  labelText: string;
+  confidence: 'high' | 'medium' | 'low';
+  rejectedReason?: string;
+}
+
+export interface TsetmcDomPriceExtractionResult {
+  selected?: TsetmcPriceCandidate;
+  latestTrade?: TsetmcPriceCandidate;
+  closingPrice?: TsetmcPriceCandidate;
+  candidates: TsetmcPriceCandidate[];
+  rejectedCandidates: TsetmcPriceCandidate[];
 }
 
 interface TsetmcCacheRecord<T> {
@@ -500,61 +520,202 @@ export function readInstrumentNameFromDocument(documentRef: Document): string | 
   return headerText?.replace(/\([^)]+\)/g, '').replace(/\s+-\s+.*$/, '').trim() || undefined;
 }
 
-function parseFirstNumberAfterLabel(text: string, label: string): number | undefined {
-  const compact = text.replace(/\s+/g, ' ').trim();
-  const labelIndex = compact.indexOf(label);
-  if (labelIndex < 0) {
-    return undefined;
-  }
-
-  const afterLabel = compact.slice(labelIndex + label.length);
-  const match = afterLabel.match(/[+-]?[۰-۹٠-٩\d][۰-۹٠-٩\d,٬٫.]*/);
-  return parseLocalizedNumber(match?.[0]);
+function normalizeDomText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
-function readLabeledPriceFromRows(documentRef: Document, label: string): number | undefined {
-  const rowText = Array.from(documentRef.querySelectorAll('#TopBox tr, #MainContent tr, #MainBox tr, tr'))
-    .map((node) => node.textContent ?? '')
-    .find((text) => text.includes(label));
-
-  return rowText ? parseFirstNumberAfterLabel(rowText, label) : undefined;
+function normalizedDigitLength(value: string): number {
+  return value.replace(/[^\d۰-۹٠-٩]/g, '').length;
 }
 
-export function readCurrentPriceFromDocument(documentRef: Document): number | undefined {
-  const labeledLastTrade = readLabeledPriceFromRows(documentRef, 'آخرین معامله');
-  if (labeledLastTrade !== undefined && labeledLastTrade > 0) {
-    return labeledLastTrade;
+function validPriceToken(rawText: string): { value?: number; rejectedReason?: string } {
+  const digits = normalizedDigitLength(rawText);
+  if (digits >= 12) {
+    return { rejectedReason: 'candidate looks like an InsCode or concatenated identifier' };
+  }
+  if (digits > 8) {
+    return { rejectedReason: 'candidate has more than 8 digits' };
+  }
+  if (/[٫.]/.test(rawText)) {
+    return { rejectedReason: 'candidate looks like a decimal change/percent, not a price' };
   }
 
-  for (const selector of priceSelectors) {
-    const text = documentRef.querySelector(selector)?.textContent;
-    const price = parseLocalizedNumber(text);
-    if (price !== undefined && price > 0) {
-      return price;
+  const value = parseLocalizedNumber(rawText);
+  if (value === undefined || !Number.isInteger(value) || value <= 0) {
+    return { rejectedReason: 'candidate is not a positive integer price' };
+  }
+  if (value > 99_999_999) {
+    return { rejectedReason: 'candidate is outside supported price range' };
+  }
+
+  return { value };
+}
+
+export function extractPriceCandidatesFromText(
+  text: string,
+  source: TsetmcDomPriceSource,
+  labelText = text
+): { candidates: TsetmcPriceCandidate[]; rejectedCandidates: TsetmcPriceCandidate[] } {
+  const compact = normalizeDomText(text);
+  const tokenPattern = /[+-]?(?:[۰-۹٠-٩\d]{1,3}(?:[,٬][۰-۹٠-٩\d]{3})+|[۰-۹٠-٩\d]+)(?:[٫.][۰-۹٠-٩\d]+)?/g;
+  const candidates: TsetmcPriceCandidate[] = [];
+  const rejectedCandidates: TsetmcPriceCandidate[] = [];
+
+  for (const match of compact.matchAll(tokenPattern)) {
+    const rawText = match[0];
+    const validated = validPriceToken(rawText);
+    const candidate: TsetmcPriceCandidate = {
+      value: validated.value,
+      rawText,
+      source,
+      labelText: normalizeDomText(labelText).slice(0, 160),
+      confidence: source === 'dom-selector' ? 'medium' : 'high',
+      rejectedReason: validated.rejectedReason
+    };
+    if (validated.value !== undefined) {
+      candidates.push(candidate);
+    } else {
+      rejectedCandidates.push(candidate);
     }
   }
 
-  const likelyPriceText = Array.from(documentRef.querySelectorAll('td, span, div'))
-    .map((node) => node.textContent?.trim() ?? '')
-    .find((text) => /قیمت\s*(پایانی|آخرین|معامله)/.test(text));
+  return { candidates, rejectedCandidates };
+}
 
-  const likelyPrice = parseFirstNumberAfterLabel(likelyPriceText ?? '', 'قیمت') ?? parseLocalizedNumber(likelyPriceText);
-  return likelyPrice !== undefined && likelyPrice > 0 ? likelyPrice : undefined;
+function extractFirstPriceAfterLabel(
+  text: string,
+  label: string,
+  source: TsetmcDomPriceSource
+): { selected?: TsetmcPriceCandidate; candidates: TsetmcPriceCandidate[]; rejectedCandidates: TsetmcPriceCandidate[] } {
+  const compact = normalizeDomText(text);
+  const labelIndex = compact.indexOf(label);
+  if (labelIndex < 0) {
+    return { candidates: [], rejectedCandidates: [] };
+  }
+
+  const afterLabel = compact.slice(labelIndex + label.length);
+  const nextLabelIndex = afterLabel.search(/آخرین معامله|قیمت پایانی|قیمت دیروز|بازه مجاز|تعداد معاملات|حجم معاملات/);
+  const scopedText = nextLabelIndex > 0 ? afterLabel.slice(0, nextLabelIndex) : afterLabel;
+  const extracted = extractPriceCandidatesFromText(scopedText, source, compact);
+  return {
+    selected: extracted.candidates[0],
+    candidates: extracted.candidates,
+    rejectedCandidates: extracted.rejectedCandidates
+  };
+}
+
+function readLabeledPriceFromRows(
+  documentRef: Document,
+  label: string,
+  source: TsetmcDomPriceSource
+): { selected?: TsetmcPriceCandidate; candidates: TsetmcPriceCandidate[]; rejectedCandidates: TsetmcPriceCandidate[] } {
+  const rows = Array.from(documentRef.querySelectorAll('#TopBox tr, #MainContent tr, #MainBox tr, tr'))
+    .map((node) => node.textContent ?? '')
+    .filter((text) => text.includes(label));
+
+  const candidates: TsetmcPriceCandidate[] = [];
+  const rejectedCandidates: TsetmcPriceCandidate[] = [];
+  for (const rowText of rows) {
+    const extracted = extractFirstPriceAfterLabel(rowText, label, source);
+    candidates.push(...extracted.candidates);
+    rejectedCandidates.push(...extracted.rejectedCandidates);
+    if (extracted.selected) {
+      return { selected: extracted.selected, candidates, rejectedCandidates };
+    }
+  }
+
+  return { candidates, rejectedCandidates };
+}
+
+function readSelectorPriceCandidates(documentRef: Document): {
+  selected?: TsetmcPriceCandidate;
+  candidates: TsetmcPriceCandidate[];
+  rejectedCandidates: TsetmcPriceCandidate[];
+} {
+  const candidates: TsetmcPriceCandidate[] = [];
+  const rejectedCandidates: TsetmcPriceCandidate[] = [];
+  for (const selector of priceSelectors) {
+    const text = documentRef.querySelector(selector)?.textContent;
+    if (!text) {
+      continue;
+    }
+    const extracted = extractPriceCandidatesFromText(text, 'dom-selector');
+    candidates.push(...extracted.candidates);
+    rejectedCandidates.push(...extracted.rejectedCandidates);
+    if (extracted.candidates.length === 1) {
+      return { selected: extracted.candidates[0], candidates, rejectedCandidates };
+    }
+  }
+
+  return { candidates, rejectedCandidates };
+}
+
+export function extractCurrentPriceFromTsetmcDom(documentRef: Document): TsetmcDomPriceExtractionResult {
+  const candidates: TsetmcPriceCandidate[] = [];
+  const rejectedCandidates: TsetmcPriceCandidate[] = [];
+
+  const latest = readLabeledPriceFromRows(documentRef, 'آخرین معامله', 'dom-latest-trade');
+  candidates.push(...latest.candidates);
+  rejectedCandidates.push(...latest.rejectedCandidates);
+  if (latest.selected) {
+    return {
+      selected: latest.selected,
+      latestTrade: latest.selected,
+      candidates,
+      rejectedCandidates
+    };
+  }
+
+  const closing = readLabeledPriceFromRows(documentRef, 'قیمت پایانی', 'dom-closing-price');
+  candidates.push(...closing.candidates);
+  rejectedCandidates.push(...closing.rejectedCandidates);
+  if (closing.selected) {
+    return {
+      selected: closing.selected,
+      closingPrice: closing.selected,
+      candidates,
+      rejectedCandidates
+    };
+  }
+
+  const selector = readSelectorPriceCandidates(documentRef);
+  candidates.push(...selector.candidates);
+  rejectedCandidates.push(...selector.rejectedCandidates);
+  if (selector.selected) {
+    return { selected: selector.selected, candidates, rejectedCandidates };
+  }
+
+  const labeledBlocks = Array.from(documentRef.querySelectorAll('td, span, div'))
+    .map((node) => node.textContent?.trim() ?? '')
+    .filter((text) => /آخرین معامله|قیمت پایانی/.test(text));
+
+  for (const text of labeledBlocks) {
+    const source = text.includes('آخرین معامله') ? 'dom-latest-trade' : 'dom-closing-price';
+    const label = source === 'dom-latest-trade' ? 'آخرین معامله' : 'قیمت پایانی';
+    const extracted = extractFirstPriceAfterLabel(text, label, source);
+    candidates.push(...extracted.candidates);
+    rejectedCandidates.push(...extracted.rejectedCandidates);
+    if (extracted.selected) {
+      return { selected: extracted.selected, candidates, rejectedCandidates };
+    }
+  }
+
+  return { candidates, rejectedCandidates };
+}
+
+export function readCurrentPriceFromDocument(documentRef: Document): number | undefined {
+  return extractCurrentPriceFromTsetmcDom(documentRef).selected?.value;
 }
 
 export function readClosingPriceFromDocument(documentRef: Document): number | undefined {
-  const labeledClosing = readLabeledPriceFromRows(documentRef, 'قیمت پایانی');
-  if (labeledClosing !== undefined && labeledClosing > 0) {
-    return labeledClosing;
-  }
-
-  return undefined;
+  return readLabeledPriceFromRows(documentRef, 'قیمت پایانی', 'dom-closing-price').selected?.value;
 }
 
 export function snapshotTsetmcPage(documentRef: Document, href: string): TsetmcPageSnapshot {
   const detected = detectCurrentTsetmcSymbol(documentRef, href);
   const insCode = detectInsCodeFromUrl(href);
   const symbol = sanitizeDetectedSymbol(detected.symbol, insCode);
+  const price = extractCurrentPriceFromTsetmcDom(documentRef);
 
   return {
     displaySymbol: symbol,
@@ -562,7 +723,13 @@ export function snapshotTsetmcPage(documentRef: Document, href: string): TsetmcP
     instrumentName: readInstrumentNameFromDocument(documentRef),
     insCode,
     symbolSource: detected.source,
-    currentPrice: readCurrentPriceFromDocument(documentRef),
+    currentPrice: price.selected?.value,
+    currentPriceSource:
+      price.selected?.source === 'dom-latest-trade'
+        ? 'dom-latest-trade'
+        : price.selected?.source === 'dom-closing-price'
+          ? 'dom-closing-price'
+          : 'unknown',
     closingPrice: readClosingPriceFromDocument(documentRef),
     capturedAt: new Date().toISOString()
   };
