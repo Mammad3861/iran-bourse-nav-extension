@@ -98,7 +98,8 @@ function renderCodalDetail(result: CodalReportDetailResult): void {
 function suggestionText(value: ExtractedPortfolioValue): string {
   const confidence =
     value.confidence === 'high' ? 'اطمینان بالا' : value.confidence === 'medium' ? 'اطمینان متوسط' : 'اطمینان پایین';
-  return `${value.label}: ${formatNumberFa(value.value)} (${confidence})`;
+  const unit = value.unit ? `، واحد: ${value.unit}` : '';
+  return `${value.label}: ${formatNumberFa(value.value)} (${confidence}، جدول ${value.sourceTableIndex}${unit})`;
 }
 
 function appendMonthlyDiagnostics(list: HTMLElement, result: MonthlyActivityParseResult): void {

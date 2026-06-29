@@ -20,6 +20,8 @@ export interface ExtractedPortfolioValue {
   label: string;
   value: number;
   rawText: string;
+  unit?: string;
+  unitMultiplier?: number;
   confidence: ParseConfidence;
   sourceTableIndex: number;
   sourceRowIndex?: number;
@@ -66,10 +68,37 @@ interface ParsedTable {
 }
 
 const labelPatterns: Record<PortfolioValueKind, RegExp[]> = {
-  listedPortfolioCostValue: [/بهای\s*تمام\s*شده/, /بهای\s*تمام‌شده/, /بهای\s*تمام/, /مبلغ\s*تمام\s*شده/, /مبلغ\s*بهای\s*تمام/],
-  listedPortfolioMarketValue: [/ارزش\s*بازار/, /ارزش\s*روز/, /مبلغ\s*بازار/, /مبلغ\s*ارزش\s*بازار/, /مبلغ\s*ارزش\s*روز/],
-  unlistedPortfolioCostValue: [/بهای\s*تمام\s*شده/, /بهای\s*تمام‌شده/, /بهای\s*تمام/, /مبلغ\s*تمام\s*شده/, /مبلغ\s*بهای\s*تمام/],
-  unlistedPortfolioEstimatedValue: [/ارزش\s*برآوردی/, /ارزش\s*روز/, /ارزش\s*بازار/, /خالص\s*ارزش/, /مبلغ\s*بازار/, /مبلغ\s*ارزش/],
+  listedPortfolioCostValue: [
+    /بهای\s*تمام\s*شده/,
+    /بهای\s*تمام‌شده/,
+    /بهای\s*تمام/,
+    /مبلغ\s*تمام\s*شده/,
+    /مبلغ\s*تمام‌شده/,
+    /مبلغ\s*بهای\s*تمام/
+  ],
+  listedPortfolioMarketValue: [
+    /ارزش\s*بازار/,
+    /ارزش\s*روز/,
+    /مبلغ\s*بازار/,
+    /مبلغ\s*ارزش\s*بازار/,
+    /مبلغ\s*ارزش\s*روز/
+  ],
+  unlistedPortfolioCostValue: [
+    /بهای\s*تمام\s*شده/,
+    /بهای\s*تمام‌شده/,
+    /بهای\s*تمام/,
+    /مبلغ\s*تمام\s*شده/,
+    /مبلغ\s*تمام‌شده/,
+    /مبلغ\s*بهای\s*تمام/
+  ],
+  unlistedPortfolioEstimatedValue: [
+    /ارزش\s*برآوردی/,
+    /ارزش\s*روز/,
+    /ارزش\s*بازار/,
+    /خالص\s*ارزش/,
+    /مبلغ\s*بازار/,
+    /مبلغ\s*ارزش/
+  ],
   unlistedPortfolioSurplusSuggestion: [/مازاد/]
 };
 
@@ -92,8 +121,27 @@ const portfolioSignals = [
   /سرمایه‌گذاری/
 ];
 
-const totalRowPatterns = [/^جمع$/, /^جمع\s*کل$/, /جمع\s*سرمایه\s*گذاری/, /جمع\s*سرمایه‌گذاری/, /جمع\s*پرتفوی/, /جمع\s*پورتفوی/];
-const unitMillionRialPatterns = [/میلیون\s*ریال/, /میلیون\s*ریالی/];
+const totalRowPatterns = [
+  /^جمع$/,
+  /^جمع\s*کل$/,
+  /^مجموع$/,
+  /جمع\s*سرمایه\s*گذاری/,
+  /جمع\s*سرمایه‌گذاری/,
+  /مجموع\s*سرمایه\s*گذاری/,
+  /مجموع\s*سرمایه‌گذاری/,
+  /جمع\s*پرتفوی/,
+  /جمع\s*پورتفوی/,
+  /مانده\s*پایان\s*دوره/,
+  /سرمایه\s*گذاری\s*ها/,
+  /سرمایه‌گذاری\s*ها/
+];
+
+interface UnitInfo {
+  unit: 'ریال' | 'هزار ریال' | 'میلیون ریال' | 'میلیون تومان' | 'نامشخص';
+  multiplier: number;
+  clear: boolean;
+  warning?: string;
+}
 
 function normalizeText(value: string): string {
   return normalizePersianArabicDigits(value)
@@ -119,8 +167,7 @@ function textFromHtml(html: string): string {
 
 function cellsFromRow(rowHtml: string): string[] {
   return Array.from(rowHtml.matchAll(/<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi))
-    .map((match) => textFromHtml(match[1]))
-    .filter(Boolean);
+    .map((match) => textFromHtml(match[1]));
 }
 
 function tablesFromHtml(html: string): ParsedTable[] {
@@ -192,8 +239,8 @@ function tablesFromExtractedTables(tables: CodalExtractedTable[] | undefined): P
         index: table.index,
         caption: table.caption,
         rows: rows
-          .map((row) => row.map((cell) => normalizeText(String(cell))).filter(Boolean))
-          .filter((row) => row.length > 0)
+          .map((row) => row.map((cell) => normalizeText(String(cell))))
+          .filter((row) => row.some(Boolean))
       };
     })
     .filter((table) => table.rows.length > 0);
@@ -214,13 +261,17 @@ function matchedLabels(text: string): string[] {
     'ارزش بازار',
     'ارزش روز',
     'مبلغ بازار',
+    'افزایش/کاهش',
     'سرمایه گذاری در سهام',
     'پذیرفته شده در بورس',
     'خارج از بورس',
     'پرتفوی بورسی',
     'پرتفوی غیر بورسی',
     'جمع',
-    'جمع کل'
+    'جمع کل',
+    'مجموع',
+    'مانده پایان دوره',
+    'سرمایه گذاری ها'
   ];
   return labels.filter((label) => normalizeText(text).includes(normalizeText(label)));
 }
@@ -255,7 +306,7 @@ function tableWarnings(table: ParsedTable): string[] {
     warnings.push('جدول ستون کافی برای استخراج مقدار ندارد.');
   }
   if (!table.rows.some((row) => row.some((cell) => hasAny(normalizeText(cell), totalRowPatterns)))) {
-    warnings.push('ردیف جمع یا جمع کل در چند ردیف اول/آخر جدول با اطمینان شناسایی نشد.');
+    warnings.push('ردیف جمع، مجموع، مانده پایان دوره یا سرمایه گذاری ها با اطمینان شناسایی نشد.');
   }
   return warnings;
 }
@@ -286,13 +337,32 @@ function parseCandidateNumber(value: string): number | undefined {
   return parsed === undefined ? undefined : parenthesized ? -Math.abs(parsed) : parsed;
 }
 
-function unitMultiplierForTable(table: ParsedTable): number {
-  return hasAny(tableText(table), unitMillionRialPatterns) ? 1_000_000 : 1;
+function unitInfoForTable(table: ParsedTable): UnitInfo {
+  const text = tableText(table);
+  if (/میلیون\s*تومان/.test(text)) {
+    return { unit: 'میلیون تومان', multiplier: 10_000_000, clear: true };
+  }
+  if (/میلیون\s*ریال|میلیون\s*ریالی/.test(text)) {
+    return { unit: 'میلیون ریال', multiplier: 1_000_000, clear: true };
+  }
+  if (/هزار\s*ریال/.test(text)) {
+    return { unit: 'هزار ریال', multiplier: 1_000, clear: true };
+  }
+  if (/(^|\s)ریال(\s|$)|مبالغ\s*به\s*ریال/.test(text)) {
+    return { unit: 'ریال', multiplier: 1, clear: true };
+  }
+
+  return {
+    unit: 'نامشخص',
+    multiplier: 1,
+    clear: false,
+    warning: 'واحد جدول با اطمینان تشخیص داده نشد؛ مقدار خام بدون مقیاس‌گذاری پیشنهاد شده است.'
+  };
 }
 
 function findColumnIndexes(rows: string[][], patterns: RegExp[]): number[] {
   const indexes = new Set<number>();
-  for (const row of rows.slice(0, 3)) {
+  for (const row of rows.slice(0, 6)) {
     row.forEach((cell, index) => {
       if (hasAny(normalizeText(cell), patterns)) {
         indexes.add(index);
@@ -313,7 +383,7 @@ function totalRows(rows: string[][]): Array<{ row: string[]; rowIndex: number; e
     .map(({ row, rowIndex, label }) => ({
       row,
       rowIndex,
-      exact: /^جمع(?:\s*کل)?$/.test(label)
+      exact: /^(جمع(?:\s*کل)?|مجموع|مانده\s*پایان\s*دوره|سرمایه\s*گذاری\s*ها|سرمایه‌گذاری\s*ها)$/.test(label)
     }));
 }
 
@@ -353,7 +423,14 @@ function extractionReason(options: {
   unitMultiplier: number;
 }): string {
   const rowName = options.usedTotalRow ? 'ردیف جمع/جمع کل' : `ردیف ${options.rowIndex + 1}`;
-  const unit = options.unitMultiplier === 1_000_000 ? '؛ واحد جدول میلیون ریال تشخیص داده شد' : '';
+  const unit =
+    options.unitMultiplier === 10_000_000
+      ? '؛ واحد جدول میلیون تومان تشخیص داده شد'
+      : options.unitMultiplier === 1_000_000
+        ? '؛ واحد جدول میلیون ریال تشخیص داده شد'
+        : options.unitMultiplier === 1_000
+          ? '؛ واحد جدول هزار ریال تشخیص داده شد'
+          : '';
   return `جدول ${options.table.index}، ستون ${options.columnIndex + 1}، ${rowName} (${options.confidence})${unit}`;
 }
 
@@ -368,7 +445,7 @@ function extractValuesFromTable(
     return [];
   }
 
-  const multiplier = unitMultiplierForTable(table);
+  const unitInfo = unitInfoForTable(table);
   const extracted: ExtractedPortfolioValue[] = [];
   for (const columnIndex of columnIndexes) {
     const rows = totalRows(table.rows);
@@ -383,17 +460,20 @@ function extractValuesFromTable(
 
     const ambiguous = columnIndexes.length > 1 || numericRows.length !== 1;
     for (const numericRow of numericRows) {
-      const confidence = confidenceForValue({
+      const baseConfidence = confidenceForValue({
         tableConfidence,
         exactTotalRow: numericRow.exact,
         exactColumnMatch: true,
         ambiguous
       });
+      const confidence = !unitInfo.clear && baseConfidence === 'high' ? 'medium' : baseConfidence;
       extracted.push({
         kind,
         label: valueLabel(kind),
-        value: numericRow.value! * multiplier,
+        value: numericRow.value! * unitInfo.multiplier,
         rawText: numericRow.rawText,
+        unit: unitInfo.unit,
+        unitMultiplier: unitInfo.multiplier,
         confidence: tableScope === 'unlisted' && confidence === 'high' ? 'medium' : confidence,
         sourceTableIndex: table.index,
         sourceRowIndex: numericRow.rowIndex,
@@ -404,12 +484,13 @@ function extractValuesFromTable(
           columnIndex,
           confidence,
           usedTotalRow: rows.length > 0,
-          unitMultiplier: multiplier
+          unitMultiplier: unitInfo.multiplier
         }),
         warning:
-          confidence === 'low'
+          unitInfo.warning ??
+          (confidence === 'low'
             ? 'این مقدار نیاز به بررسی دستی دارد؛ ردیف یا ستون استخراج مبهم است.'
-            : undefined
+            : undefined)
       });
     }
   }
@@ -436,6 +517,38 @@ function downgradeDuplicateKinds(values: ExtractedPortfolioValue[]): ExtractedPo
         }
       : value
   );
+}
+
+function extractionFailureWarnings(candidates: PortfolioTableCandidate[], tables: ParsedTable[]): string[] {
+  const warnings = new Set<string>();
+  for (const candidate of candidates) {
+    const table = tables.find((item) => item.index === candidate.index);
+    if (!table) continue;
+
+    const rows = totalRows(table.rows);
+    if (rows.length === 0) {
+      warnings.add(`جدول ${table.index}: ردیف جمع، مجموع، مانده پایان دوره یا سرمایه گذاری ها پیدا نشد.`);
+    }
+    if (rows.length > 1) {
+      warnings.add(`جدول ${table.index}: چند ردیف جمع/مجموع پیدا شد و نتیجه مبهم است.`);
+    }
+
+    const costColumns = findColumnIndexes(table.rows, labelPatterns.listedPortfolioCostValue);
+    const marketColumns = findColumnIndexes(table.rows, labelPatterns.listedPortfolioMarketValue);
+    if (costColumns.length === 0) {
+      warnings.add(`جدول ${table.index}: ستون بهای تمام شده یا مبلغ تمام شده پیدا نشد.`);
+    }
+    if (marketColumns.length === 0) {
+      warnings.add(`جدول ${table.index}: ستون ارزش بازار، ارزش روز یا مبلغ بازار پیدا نشد.`);
+    }
+
+    const unitInfo = unitInfoForTable(table);
+    if (!unitInfo.clear) {
+      warnings.add(`جدول ${table.index}: واحد گزارش مشخص نیست؛ مقدار خام بدون مقیاس‌گذاری قابل بررسی است.`);
+    }
+  }
+
+  return [...warnings];
 }
 
 export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyActivityParseResult {
@@ -545,6 +658,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   }
 
   if (safeExtractedValues.length === 0) {
+    warnings.push(...extractionFailureWarnings(candidates, tables));
     warnings.push('جدول مرتبط پیدا شد، اما مقدار عددی قابل اتکا استخراج نشد. پیش‌نمایش جدول‌ها را برای برچسب‌ها و ردیف‌های جمع بررسی کنید.');
   }
 

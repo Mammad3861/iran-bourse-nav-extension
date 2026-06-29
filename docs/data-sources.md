@@ -97,7 +97,11 @@ When a suggestion is applied, the saved manual override records source metadata 
 
 If the user later edits that field manually, the field source is marked back to `manual`.
 
-The parser supports Persian and Arabic digit normalization, comma-separated numbers, parenthesized negative values, explicit `میلیون ریال` table scaling, total rows such as `جمع` and `جمع کل`, and common Persian labels such as `بهای تمام شده`, `مبلغ تمام شده`, `ارزش بازار`, `ارزش روز`, `مبلغ بازار`, `پذیرفته شده در بورس`, `خارج از بورس`, `پرتفوی بورسی`, and `پرتفوی غیر بورسی`.
+The parser supports Persian and Arabic digit normalization, comma-separated numbers, parenthesized negative values, explicit unit hints, total rows such as `جمع`, `جمع کل`, `مجموع`, `مانده پایان دوره`, and `سرمایه گذاری ها`, and common Persian labels such as `بهای تمام شده`, `مبلغ تمام شده`, `ارزش بازار`, `ارزش روز`, `مبلغ بازار`, `پذیرفته شده در بورس`, `خارج از بورس`, `پرتفوی بورسی`, and `پرتفوی غیر بورسی`.
+
+Supported unit hints currently include `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان`. If the table unit is unclear, the parser keeps the raw numeric value, downgrades confidence, and attaches a warning instead of silently scaling the value.
+
+Codal row alignment is preserved during table normalization, including empty cells inside rows. This is important because many monthly activity tables contain blank cells, and dropping those cells can shift cost and market-value columns.
 
 Confidence is intentionally conservative:
 

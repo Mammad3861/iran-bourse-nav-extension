@@ -94,7 +94,8 @@ Limited public smoke testing on 2026-06-28 verified that:
 * Public Codal search returns metadata for sample symbols, but may require Persian/Arabic ticker spelling variants.
 * Codal `Length` is treated as a period filter, not a page-size limit; the client keeps it at `-1`.
 * Codal detail pages may expose portfolio tables as HTML tables, embedded JSON, or script-held row/cell data. The client now reports detected content type, table count, header previews, and parser warnings when a shape is unsupported.
-* Monthly parser diagnostics show table previews, detected labels, candidate values, and confidence reasons to help users review unsupported or ambiguous Codal reports.
+* Monthly parser diagnostics show table previews, detected labels, candidate values, units, table indexes, and confidence reasons to help users review unsupported or ambiguous Codal reports.
+* Parser extraction now preserves empty table cells for safer column alignment and supports explicit `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان` unit hints. Unclear units are shown as raw values with warnings rather than silently scaled.
 * Chrome automation could not open `chrome://extensions/`, so final unpacked-extension loading from `dist/` must be checked manually in Chrome.
 
 ## Development
@@ -188,7 +189,7 @@ public/icons/       Extension icons
 
 * Improve parser coverage with more real report fixtures
 * Improve Codal detail table detection for HTML, JSON, and script-embedded table data
-* Add total-row extraction, unit/scale hints, and parser diagnostics for suggested values
+* Add diagnostics-driven total-row extraction, unit/scale hints, and parser diagnostics for suggested values
 * Add stronger review workflow before accepting parsed values
 
 ### v1.0

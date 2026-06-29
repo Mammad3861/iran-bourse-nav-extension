@@ -192,7 +192,7 @@ describe('parseMonthlyActivityReport', () => {
           {
             index: 2,
             source: 'script-json',
-            caption: 'پرتفوی بورسی پذیرفته شده در بورس',
+            caption: 'پرتفوی بورسی پذیرفته شده در بورس - مبالغ به ریال',
             headers: ['نام شرکت', 'مبلغ تمام شده', 'مبلغ بازار'],
             rows: [
               ['نام شرکت', 'مبلغ تمام شده', 'مبلغ بازار'],
@@ -315,5 +315,116 @@ describe('parseMonthlyActivityReport', () => {
       })
     );
     expect(result.warnings.join(' ')).toContain('پیش‌نمایش جدول');
+  });
+
+  it('extracts reliable listed values from a real-like وصندوق diagnostics fixture', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        title: 'صورت وضعیت پورتفوی دوره ۱ ماهه منتهی به ۱۴۰۵/۰۳/۳۱',
+        symbol: 'وصندوق',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'script-json',
+            caption: 'مشخصات گزارش',
+            headers: ['شرح', 'مقدار'],
+            rows: [
+              ['شرح', 'مقدار'],
+              ['دوره', '۱۴۰۵/۰۳/۳۱']
+            ]
+          },
+          {
+            index: 1,
+            source: 'script-json',
+            caption: 'خلاصه وضعیت',
+            headers: ['شرح', 'مبلغ'],
+            rows: [
+              ['شرح', 'مبلغ'],
+              ['درآمد سود سهام', '۱۰۰']
+            ]
+          },
+          {
+            index: 2,
+            source: 'script-json',
+            caption: 'صورت وضعیت پورتفوی شرکتهای پذیرفته شده در بورس - مبالغ به میلیون ریال',
+            headers: ['نام شرکت', 'تعداد سهام', 'بهای تمام شده', 'ارزش بازار', 'افزایش/کاهش'],
+            rows: [
+              ['نام شرکت', 'تعداد سهام', 'بهای تمام شده', 'ارزش بازار', 'افزایش/کاهش'],
+              ['سرمایه گذاری در سهام شرکت الف', '۱,۰۰۰', '۲,۵۰۰', '۳,۷۰۰', '۱,۲۰۰'],
+              ['سرمایه گذاری در سهام شرکت ب', '۲,۰۰۰', '۳,۵۰۰', '۴,۳۰۰', '۸۰۰'],
+              ['مانده پایان دوره', '', '۶,۰۰۰', '۸,۰۰۰', '۲,۰۰۰']
+            ]
+          },
+          {
+            index: 3,
+            source: 'script-json',
+            caption: 'صورت وضعیت پورتفوی شرکتهای خارج از بورس',
+            headers: ['شرح', 'بهای تمام شده'],
+            rows: [
+              ['شرح', 'بهای تمام شده'],
+              ['فاقد ارزش برآوردی قابل اتکا', '۵۰۰']
+            ]
+          },
+          {
+            index: 4,
+            source: 'script-json',
+            caption: 'سایر اطلاعات',
+            headers: ['شرح', 'مقدار'],
+            rows: [
+              ['شرح', 'مقدار'],
+              ['توضیحات', 'بدون مقدار']
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(result.status).toBe('parsed');
+    expect(result.tableCandidates.map((candidate) => candidate.index)).toContain(2);
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'listedPortfolioCostValue',
+          value: 6_000_000_000,
+          confidence: 'high',
+          sourceTableIndex: 2,
+          unit: 'میلیون ریال',
+          reason: expect.stringContaining('ردیف جمع')
+        }),
+        expect.objectContaining({
+          kind: 'listedPortfolioMarketValue',
+          value: 8_000_000_000,
+          confidence: 'high',
+          sourceTableIndex: 2,
+          unit: 'میلیون ریال'
+        })
+      ])
+    );
+  });
+
+  it('returns raw values with warnings when the table unit is unclear', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش بازار</th></tr>
+            <tr><td>جمع</td><td>۶۰۰۰</td><td>۸۰۰۰</td></tr>
+          </table>
+        `
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'listedPortfolioCostValue',
+          value: 6000,
+          confidence: 'medium',
+          unit: 'نامشخص',
+          warning: expect.stringContaining('واحد')
+        })
+      ])
+    );
   });
 });
