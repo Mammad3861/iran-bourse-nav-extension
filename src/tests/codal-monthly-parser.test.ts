@@ -122,7 +122,7 @@ describe('parseMonthlyActivityReport', () => {
     );
 
     expect(result.status).toBe('ambiguous');
-    expect(result.warnings.join(' ')).toContain('چند مقدار');
+    expect(result.warnings.join(' ')).toContain('چند کاندید');
   });
 
   it('parses JSON table-like details', () => {
@@ -183,5 +183,137 @@ describe('parseMonthlyActivityReport', () => {
         expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 2700 })
       ])
     );
+  });
+
+  it('extracts values from a Codal-like total row labeled جمع', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        extractedTables: [
+          {
+            index: 2,
+            source: 'script-json',
+            caption: 'پرتفوی بورسی پذیرفته شده در بورس',
+            headers: ['نام شرکت', 'مبلغ تمام شده', 'مبلغ بازار'],
+            rows: [
+              ['نام شرکت', 'مبلغ تمام شده', 'مبلغ بازار'],
+              ['شرکت الف', '۱۰۰', '۱۳۰'],
+              ['شرکت ب', '۲۰۰', '۲۷۰'],
+              ['جمع', '۳۰۰', '۴۰۰']
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(result.status).toBe('parsed');
+    expect(result.tablePreviews[0]).toEqual(
+      expect.objectContaining({
+        index: 2,
+        detectedLabels: expect.arrayContaining(['مبلغ تمام شده', 'مبلغ بازار', 'جمع'])
+      })
+    );
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'listedPortfolioCostValue',
+          value: 300,
+          confidence: 'high',
+          sourceTableIndex: 2,
+          sourceRowIndex: 3,
+          reason: expect.stringContaining('ردیف جمع')
+        }),
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 400, confidence: 'high' })
+      ])
+    );
+  });
+
+  it('supports Arabic digits, commas, whitespace, and parenthesized negative values', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش روز</th></tr>
+            <tr><td>جمع کل</td><td> ١,٢٣٤ </td><td>(٢٣٤)</td></tr>
+          </table>
+        `
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 1234 }),
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: -234 })
+      ])
+    );
+  });
+
+  it('scales explicitly million-rial tables', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس - مبالغ به میلیون ریال</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش بازار</th></tr>
+            <tr><td>جمع</td><td>۲</td><td>۳</td></tr>
+          </table>
+        `
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 2_000_000 }),
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 3_000_000 })
+      ])
+    );
+  });
+
+  it('marks multiple total rows as low-confidence candidates instead of guessing', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش بازار</th></tr>
+            <tr><td>جمع صنعت اول</td><td>۱۰۰</td><td>۱۵۰</td></tr>
+            <tr><td>جمع صنعت دوم</td><td>۲۰۰</td><td>۲۵۰</td></tr>
+          </table>
+        `
+      })
+    );
+
+    expect(result.status).toBe('ambiguous');
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'listedPortfolioCostValue', confidence: 'low' }),
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', confidence: 'low' })
+      ])
+    );
+    expect(result.warnings.join(' ')).toContain('چند کاندید');
+  });
+
+  it('returns table diagnostics when no reliable numeric values exist', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش بازار</th></tr>
+            <tr><td>جمع</td><td>---</td><td>نامشخص</td></tr>
+          </table>
+        `
+      })
+    );
+
+    expect(result.status).toBe('ambiguous');
+    expect(result.extractedValues).toHaveLength(0);
+    expect(result.tablePreviews[0]).toEqual(
+      expect.objectContaining({
+        headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+        detectedLabels: expect.arrayContaining(['بهای تمام شده', 'ارزش بازار', 'جمع'])
+      })
+    );
+    expect(result.warnings.join(' ')).toContain('پیش‌نمایش جدول');
   });
 });

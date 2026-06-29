@@ -77,6 +77,14 @@ It may suggest these candidate values when labels and tables are clear enough:
 - A low-confidence unlisted surplus suggestion when both unlisted cost and estimated value are present.
 - Report period/date when detectable from the title or preview.
 
+For detected tables, the parser also exposes diagnostics for review:
+
+- Table index and caption/title when available.
+- First headers and first rows after normalization.
+- A normalized text preview.
+- Detected Persian labels and parser warnings.
+- Candidate value row/column indexes and a confidence reason.
+
 These values are suggestions only. The widget can copy supported suggestions into manual fields only after the user clicks an explicit apply action. No parsed value is applied automatically, and no parsed value is used for NAV calculation unless the user manually accepts or edits it.
 
 When a suggestion is applied, the saved manual override records source metadata for that field:
@@ -89,7 +97,13 @@ When a suggestion is applied, the saved manual override records source metadata 
 
 If the user later edits that field manually, the field source is marked back to `manual`.
 
-The parser supports Persian and Arabic digit normalization, comma-separated numbers, and common Persian labels such as `بهای تمام شده`, `ارزش بازار`, `ارزش روز`, `پذیرفته شده در بورس`, `خارج از بورس`, `پرتفوی بورسی`, and `پرتفوی غیر بورسی`.
+The parser supports Persian and Arabic digit normalization, comma-separated numbers, parenthesized negative values, explicit `میلیون ریال` table scaling, total rows such as `جمع` and `جمع کل`, and common Persian labels such as `بهای تمام شده`, `مبلغ تمام شده`, `ارزش بازار`, `ارزش روز`, `مبلغ بازار`, `پذیرفته شده در بورس`, `خارج از بورس`, `پرتفوی بورسی`, and `پرتفوی غیر بورسی`.
+
+Confidence is intentionally conservative:
+
+- High confidence requires a portfolio table, exact value label, one usable total row, and one valid numeric value.
+- Medium confidence is used for likely labels/tables or unlisted values that still require review.
+- Low confidence is used for ambiguous labels, duplicate candidates, multiple total rows, or derived surplus values. Low-confidence values are shown for review but are not included in bulk apply actions.
 
 Detail fetch states are explicit:
 

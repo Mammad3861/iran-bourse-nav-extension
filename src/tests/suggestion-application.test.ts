@@ -66,6 +66,7 @@ describe('suggestion application', () => {
       reportTitle: 'گزارش فعالیت ماهانه',
       reportPeriod: '1405/03/31',
       tableCandidates: [],
+      tablePreviews: [],
       extractedValues: [
         suggestion('listedPortfolioCostValue', 1000, 'high'),
         suggestion('listedPortfolioMarketValue', 1500, 'high'),
@@ -117,6 +118,7 @@ describe('suggestion application', () => {
       {
         status: 'parsed',
         tableCandidates: [],
+        tablePreviews: [],
         extractedValues: [
           suggestion('listedPortfolioCostValue', 1000),
           suggestion('listedPortfolioMarketValue', 1600)

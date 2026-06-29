@@ -26,6 +26,9 @@ import styles from './styles.css?inline';
 
 export interface NavWidgetOptions {
   symbol: string;
+  insCode?: string;
+  codalSymbol?: string;
+  instrumentName?: string;
   currentPrice?: number;
   currentPriceSource: ManualOverrideRecord['currentPriceSource'];
   mount?: HTMLElement;
@@ -180,6 +183,88 @@ function suggestionText(value: ExtractedPortfolioValue): string {
   return `${value.label}: ${formatNumberFa(value.value)} (${confidence})`;
 }
 
+function parserDiagnosticsText(result: MonthlyActivityParseResult): string {
+  return [
+    `Report: ${result.reportTitle ?? '-'}`,
+    `Period: ${result.reportPeriod ?? '-'}`,
+    `Status: ${result.status}`,
+    `Warnings: ${result.warnings.join(' | ') || '-'}`,
+    ...result.tablePreviews.map((table) =>
+      [
+        `Table ${table.index}`,
+        `Caption: ${table.caption ?? '-'}`,
+        `Headers: ${table.headers.join(' | ') || '-'}`,
+        `Labels: ${table.detectedLabels.join(' | ') || '-'}`,
+        `Rows: ${table.rows.map((row) => row.join(' | ')).join(' / ')}`,
+        `Warnings: ${table.warnings.join(' | ') || '-'}`
+      ].join('\n')
+    )
+  ].join('\n\n');
+}
+
+function appendMonthlyDiagnostics(
+  list: HTMLElement,
+  result: MonthlyActivityParseResult,
+  setStatus: (message: string, isError?: boolean) => void
+): void {
+  const preview = document.createElement('div');
+  preview.className = 'ibnav-diagnostics';
+
+  const previewTitle = document.createElement('h5');
+  previewTitle.className = 'ibnav-subtitle';
+  previewTitle.textContent = 'پیش‌نمایش جدول‌های شناسایی‌شده';
+  preview.appendChild(previewTitle);
+
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'ibnav-apply ibnav-secondary';
+  copyButton.textContent = 'کپی تشخیص Parser';
+  copyButton.addEventListener('click', async () => {
+    try {
+      if (!window.navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API در این صفحه در دسترس نیست.');
+      }
+      await window.navigator.clipboard.writeText(parserDiagnosticsText(result));
+      setStatus('تشخیص Parser کپی شد.');
+    } catch (error) {
+      setStatus(`کپی تشخیص Parser ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`, true);
+    }
+  });
+  preview.appendChild(copyButton);
+
+  if (result.tablePreviews.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'ibnav-muted';
+    empty.textContent = 'پیش‌نمایش جدولی برای نمایش وجود ندارد.';
+    preview.appendChild(empty);
+  }
+
+  for (const table of result.tablePreviews.slice(0, 5)) {
+    const item = document.createElement('details');
+    item.className = 'ibnav-table-preview';
+    const summary = document.createElement('summary');
+    summary.textContent = `جدول ${table.index}${table.caption ? ` - ${table.caption}` : ''}`;
+    item.appendChild(summary);
+    const meta = document.createElement('p');
+    meta.className = 'ibnav-muted';
+    meta.textContent = `برچسب‌ها: ${table.detectedLabels.join('، ') || 'نامشخص'} | هشدار: ${
+      table.warnings.join('، ') || '-'
+    }`;
+    item.appendChild(meta);
+    const rows = document.createElement('pre');
+    rows.className = 'ibnav-preview-code';
+    rows.textContent = table.rows.map((row) => row.join(' | ')).join('\n');
+    item.appendChild(rows);
+    preview.appendChild(item);
+  }
+
+  const candidateTitle = document.createElement('h5');
+  candidateTitle.className = 'ibnav-subtitle';
+  candidateTitle.textContent = 'کاندیدهای استخراج‌شده';
+  preview.appendChild(candidateTitle);
+  list.appendChild(preview);
+}
+
 function recordFromCurrentInputs(
   root: HTMLElement,
   symbol: string,
@@ -236,6 +321,7 @@ function renderMonthlySuggestions(
   warnings.textContent = result.warnings.length ? result.warnings.join(' ') : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.';
 
   list.textContent = '';
+  appendMonthlyDiagnostics(list, result, (message, isError) => setApplyStatus(root, message, isError));
   applyAll.hidden = !result.extractedValues.some(
     (value) => value.confidence === 'high' && suggestionTarget(value.kind)
   );
@@ -288,8 +374,13 @@ function renderMonthlySuggestions(
       : result.reportTitle ?? 'گزارش کدال';
     item.appendChild(sourceLine);
 
+    const reason = document.createElement('small');
+    reason.className = 'ibnav-muted';
+    reason.textContent = value.reason ? `دلیل اطمینان: ${value.reason}` : 'دلیل اطمینان: بر اساس برچسب‌های جدول و مقدار عددی.';
+    item.appendChild(reason);
+
     const target = suggestionTarget(value.kind);
-    if (target) {
+    if (target && value.confidence !== 'low') {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'ibnav-apply';
@@ -333,7 +424,7 @@ function renderMonthlySuggestions(
     if (value.warning || value.confidence === 'low') {
       const warning = document.createElement('small');
       warning.className = 'ibnav-muted';
-      warning.textContent = value.warning ?? 'این مقدار با اطمینان پایین استخراج شده است.';
+      warning.textContent = value.warning ?? 'این مقدار نیاز به بررسی دستی دارد.';
       item.appendChild(warning);
     }
     list.appendChild(item);
@@ -357,7 +448,10 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     <header class="ibnav-header">
       <div>
         <h2 class="ibnav-title">محاسبه NAV</h2>
-        <div class="ibnav-symbol">${options.symbol}</div>
+        <div class="ibnav-symbol">نماد: ${options.symbol}</div>
+        ${options.instrumentName ? `<div class="ibnav-muted">${options.instrumentName}</div>` : ''}
+        ${options.insCode ? `<div class="ibnav-muted">InsCode: ${options.insCode}</div>` : ''}
+        ${options.codalSymbol ? `<div class="ibnav-muted">نماد کدال: ${options.codalSymbol}</div>` : ''}
       </div>
       <button type="button" class="ibnav-collapse" title="باز و بسته کردن">−</button>
     </header>
@@ -415,7 +509,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
 
   const updatedAt = activeRecord ? formatPersianTimestamp(new Date(activeRecord.updatedAt)) : formatPersianTimestamp();
   updateResults(root, updatedAt);
-  const codalSymbolValidation = validateCodalSearchSymbol(options.symbol);
+  const codalSymbolValidation = validateCodalSearchSymbol(options.codalSymbol ?? options.symbol);
   if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
     renderCodalDiscovery(root, {
       status: 'not-found',

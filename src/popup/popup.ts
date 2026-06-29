@@ -101,6 +101,45 @@ function suggestionText(value: ExtractedPortfolioValue): string {
   return `${value.label}: ${formatNumberFa(value.value)} (${confidence})`;
 }
 
+function appendMonthlyDiagnostics(list: HTMLElement, result: MonthlyActivityParseResult): void {
+  const preview = document.createElement('div');
+  preview.className = 'ibnav-diagnostics';
+  const title = document.createElement('h5');
+  title.className = 'ibnav-subtitle';
+  title.textContent = 'پیش‌نمایش جدول‌های شناسایی‌شده';
+  preview.appendChild(title);
+
+  if (result.tablePreviews.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'ibnav-muted';
+    empty.textContent = 'پیش‌نمایش جدولی برای نمایش وجود ندارد.';
+    preview.appendChild(empty);
+  }
+
+  for (const table of result.tablePreviews.slice(0, 3)) {
+    const item = document.createElement('details');
+    item.className = 'ibnav-table-preview';
+    const summary = document.createElement('summary');
+    summary.textContent = `جدول ${table.index}${table.caption ? ` - ${table.caption}` : ''}`;
+    item.appendChild(summary);
+    const meta = document.createElement('p');
+    meta.className = 'ibnav-muted';
+    meta.textContent = `برچسب‌ها: ${table.detectedLabels.join('، ') || 'نامشخص'}`;
+    item.appendChild(meta);
+    const rows = document.createElement('pre');
+    rows.className = 'ibnav-preview-code';
+    rows.textContent = table.rows.map((row) => row.join(' | ')).join('\n');
+    item.appendChild(rows);
+    preview.appendChild(item);
+  }
+
+  const candidates = document.createElement('h5');
+  candidates.className = 'ibnav-subtitle';
+  candidates.textContent = 'کاندیدهای استخراج‌شده';
+  preview.appendChild(candidates);
+  list.appendChild(preview);
+}
+
 function renderMonthlySuggestions(result: MonthlyActivityParseResult): void {
   setText(
     '[data-popup-suggestions="status"]',
@@ -124,10 +163,23 @@ function renderMonthlySuggestions(result: MonthlyActivityParseResult): void {
   const list = document.querySelector<HTMLElement>('[data-popup-suggestions="list"]');
   if (!list) return;
   list.textContent = '';
+  appendMonthlyDiagnostics(list, result);
   for (const value of result.extractedValues) {
     const item = document.createElement('div');
     item.className = 'ibnav-suggestion';
-    item.textContent = suggestionText(value);
+    const text = document.createElement('span');
+    text.textContent = suggestionText(value);
+    item.appendChild(text);
+    const reason = document.createElement('small');
+    reason.className = 'ibnav-muted';
+    reason.textContent = value.reason ? `دلیل اطمینان: ${value.reason}` : 'دلیل اطمینان: بر اساس برچسب‌های جدول و مقدار عددی.';
+    item.appendChild(reason);
+    if (value.warning || value.confidence === 'low') {
+      const warning = document.createElement('small');
+      warning.className = 'ibnav-muted';
+      warning.textContent = value.warning ?? 'این مقدار نیاز به بررسی دستی دارد.';
+      item.appendChild(warning);
+    }
     list.appendChild(item);
   }
 }

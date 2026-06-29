@@ -43,7 +43,9 @@ export interface TsetmcPriceOptions extends TsetmcClientOptions {
 }
 
 export interface TsetmcPageSnapshot {
-  symbol?: string;
+  displaySymbol?: string;
+  codalSymbol?: string;
+  instrumentName?: string;
   insCode?: string;
   symbolSource: SymbolDetectionResult['source'];
   currentPrice?: number;
@@ -81,6 +83,35 @@ function isTsetmcSiteLabel(value: string | undefined): boolean {
 
   const normalized = value.trim().toUpperCase();
   return normalized === 'TSETMC' || normalized === 'INSTINFO' || normalized.includes('TSETMC');
+}
+
+function isLikelyInsCode(value: string | undefined): boolean {
+  return Boolean(value && /^\d{5,}$/.test(value.trim()));
+}
+
+function isLikelyPersianSymbol(value: string | undefined): boolean {
+  return Boolean(value && /^[\u0600-\u06ffA-Za-z0-9_-]{2,24}$/.test(value) && /[\u0600-\u06ff]/.test(value));
+}
+
+function sanitizeDetectedSymbol(value: string | undefined, insCode?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    normalized === 'instInfo' ||
+    normalized === insCode ||
+    isLikelyInsCode(normalized) ||
+    isTsetmcSiteLabel(normalized) ||
+    /https?:\/\//i.test(normalized) ||
+    /\b(?:www|tsetmc|codal)\b/i.test(normalized)
+  ) {
+    return undefined;
+  }
+
+  return normalized;
 }
 
 export function detectInsCodeFromUrl(href: string): string | undefined {
@@ -420,13 +451,9 @@ export async function getLatestPriceByInsCode(
 export function detectCurrentTsetmcSymbol(documentRef: Document, href: string): SymbolDetectionResult {
   const insCode = detectInsCodeFromUrl(href);
   const fromUrl = detectSymbolFromUrl(href);
-  if (
-    fromUrl.symbol &&
-    fromUrl.symbol !== 'instInfo' &&
-    fromUrl.symbol !== insCode &&
-    !isTsetmcSiteLabel(fromUrl.symbol)
-  ) {
-    return fromUrl;
+  const urlSymbol = sanitizeDetectedSymbol(fromUrl.symbol, insCode);
+  if (urlSymbol) {
+    return { symbol: urlSymbol, source: 'url' };
   }
 
   const headerText = Array.from(
@@ -438,24 +465,39 @@ export function detectCurrentTsetmcSymbol(documentRef: Document, href: string): 
   if (headerText) {
     for (const pattern of tsetmcSymbolPatterns) {
       const match = headerText.match(pattern);
-      if (match?.[1]) {
-        return { symbol: match[1], source: 'dom' };
+      const symbol = sanitizeDetectedSymbol(match?.[1], insCode);
+      if (symbol) {
+        return { symbol, source: 'dom' };
       }
     }
   }
 
   const compactSymbol = Array.from(documentRef.querySelectorAll('#MainBox span, .bigheader span'))
     .map((node) => node.textContent?.trim() ?? '')
-    .find((text) => /^[\u0600-\u06ffA-Za-z0-9_-]{2,20}$/.test(text) && !/بورس|بازار|تابلو/.test(text));
+    .find(
+      (text) =>
+        isLikelyPersianSymbol(text) &&
+        !/بورس|بازار|تابلو|مدیریت|فناوری/.test(text) &&
+        !isTsetmcSiteLabel(text)
+    );
 
   if (compactSymbol) {
     return { symbol: compactSymbol, source: 'dom' };
   }
 
   const fromDocument = detectSymbolFromDocument(documentRef);
-  return fromDocument.symbol === 'instInfo' || isTsetmcSiteLabel(fromDocument.symbol)
-    ? { source: 'unknown' }
-    : fromDocument;
+  const documentSymbol = sanitizeDetectedSymbol(fromDocument.symbol, insCode);
+  return documentSymbol ? { symbol: documentSymbol, source: 'dom' } : { source: 'unknown' };
+}
+
+export function readInstrumentNameFromDocument(documentRef: Document): string | undefined {
+  const headerText = Array.from(
+    documentRef.querySelectorAll('.bigheader, .header.bigheader, #MainBox, h1, h2, title')
+  )
+    .map((node) => node.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+    .find((text) => text.length > 0 && !isTsetmcSiteLabel(text));
+
+  return headerText?.replace(/\([^)]+\)/g, '').replace(/\s+-\s+.*$/, '').trim() || undefined;
 }
 
 function parseFirstNumberAfterLabel(text: string, label: string): number | undefined {
@@ -496,7 +538,8 @@ export function readCurrentPriceFromDocument(documentRef: Document): number | un
     .map((node) => node.textContent?.trim() ?? '')
     .find((text) => /قیمت\s*(پایانی|آخرین|معامله)/.test(text));
 
-  return parseLocalizedNumber(likelyPriceText);
+  const likelyPrice = parseFirstNumberAfterLabel(likelyPriceText ?? '', 'قیمت') ?? parseLocalizedNumber(likelyPriceText);
+  return likelyPrice !== undefined && likelyPrice > 0 ? likelyPrice : undefined;
 }
 
 export function readClosingPriceFromDocument(documentRef: Document): number | undefined {
@@ -510,10 +553,14 @@ export function readClosingPriceFromDocument(documentRef: Document): number | un
 
 export function snapshotTsetmcPage(documentRef: Document, href: string): TsetmcPageSnapshot {
   const detected = detectCurrentTsetmcSymbol(documentRef, href);
+  const insCode = detectInsCodeFromUrl(href);
+  const symbol = sanitizeDetectedSymbol(detected.symbol, insCode);
 
   return {
-    symbol: detected.symbol,
-    insCode: detectInsCodeFromUrl(href),
+    displaySymbol: symbol,
+    codalSymbol: isLikelyPersianSymbol(symbol) ? symbol : undefined,
+    instrumentName: readInstrumentNameFromDocument(documentRef),
+    insCode,
     symbolSource: detected.source,
     currentPrice: readCurrentPriceFromDocument(documentRef),
     closingPrice: readClosingPriceFromDocument(documentRef),

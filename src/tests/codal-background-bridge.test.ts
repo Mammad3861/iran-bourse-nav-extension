@@ -38,6 +38,10 @@ describe('Codal background bridge', () => {
     expect(validateCodalSearchSymbol('https://www.tsetmc.com').valid).toBe(false);
     expect(validateCodalSearchSymbol('778253364357513').valid).toBe(false);
     expect(validateCodalSearchSymbol('وغدیر')).toEqual({ valid: true, symbol: 'وغدیر' });
+    expect(validateCodalSearchSymbol('وصندوق')).toEqual({ valid: true, symbol: 'وصندوق' });
+    expect(validateCodalSearchSymbol('وبانک')).toEqual({ valid: true, symbol: 'وبانک' });
+    expect(validateCodalSearchSymbol('وامید')).toEqual({ valid: true, symbol: 'وامید' });
+    expect(validateCodalSearchSymbol('خگستر')).toEqual({ valid: true, symbol: 'خگستر' });
   });
 
   it('does not call Codal client for invalid discovery symbols', async () => {

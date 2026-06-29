@@ -19,6 +19,8 @@ This extension provides an estimate, not an audited valuation.
 - If a Codal detail page is PDF-like, empty, blocked, or shaped differently from supported table patterns, the UI should explain that no supported table was detected.
 - Unsupported Codal report formats are expected and should not block manual NAV calculations.
 - Codal monthly parser outputs are suggestions only and can be wrong when labels are ambiguous, report formats vary, units differ, numbers are malformed, or tables contain totals/subtotals in unexpected places.
+- Parser diagnostics expose a small normalized preview of public Codal table content to help review labels and candidate values; the preview is not proof that the extracted value is correct.
+- Numeric extraction prefers clear `جمع`/`جمع کل` rows. Multiple total rows, duplicate candidates, or unclear labels are intentionally downgraded to low confidence.
 - The parser does not infer units, audit restatements, capital increases, or post-report adjustments.
 - Unlisted portfolio surplus suggestions are low confidence because they are derived from reported cost and estimated values and may not match the project’s NAV assumptions.
 - Parsed Codal values never overwrite manual inputs automatically.

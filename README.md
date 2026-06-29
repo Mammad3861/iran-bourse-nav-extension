@@ -16,7 +16,7 @@ The first version is intentionally **semi-manual**. It injects a small Persian R
 * TSETMC page injection
 * Defensive TSETMC and Codal data-client boundaries
 * Codal report discovery and defensive report-detail table detection
-* Limited Codal monthly activity parser for suggested portfolio values
+* Limited Codal monthly activity parser with table diagnostics and suggested portfolio values
 * Unit-tested NAV and parsing logic
 
 ## Formula
@@ -67,6 +67,7 @@ Current MVP behavior:
 * Invalid detected symbols such as `TSETMC`, `InsCode:*`, unknown labels, URLs, domains, or numeric-only values are not searched in Codal.
 * Codal and TSETMC integrations should be treated as unstable until verified against live pages.
 * Codal detail parsing is best-effort and only produces reviewable suggestions; it never changes calculator inputs without an explicit user action.
+* Low-confidence or duplicate Codal candidates are shown for review only and are not included in bulk apply actions.
 * Output is an estimate only and must be verified manually before any financial decision.
 
 ## Data Sources
@@ -93,6 +94,7 @@ Limited public smoke testing on 2026-06-28 verified that:
 * Public Codal search returns metadata for sample symbols, but may require Persian/Arabic ticker spelling variants.
 * Codal `Length` is treated as a period filter, not a page-size limit; the client keeps it at `-1`.
 * Codal detail pages may expose portfolio tables as HTML tables, embedded JSON, or script-held row/cell data. The client now reports detected content type, table count, header previews, and parser warnings when a shape is unsupported.
+* Monthly parser diagnostics show table previews, detected labels, candidate values, and confidence reasons to help users review unsupported or ambiguous Codal reports.
 * Chrome automation could not open `chrome://extensions/`, so final unpacked-extension loading from `dist/` must be checked manually in Chrome.
 
 ## Development
@@ -186,7 +188,7 @@ public/icons/       Extension icons
 
 * Improve parser coverage with more real report fixtures
 * Improve Codal detail table detection for HTML, JSON, and script-embedded table data
-* Add unit/scale hints for suggested values
+* Add total-row extraction, unit/scale hints, and parser diagnostics for suggested values
 * Add stronger review workflow before accepting parsed values
 
 ### v1.0

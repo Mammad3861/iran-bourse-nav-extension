@@ -6,7 +6,8 @@ import {
   getLatestPriceByInsCode,
   readClosingPriceFromDocument,
   readCurrentPriceFromDocument,
-  searchSymbols
+  searchSymbols,
+  snapshotTsetmcPage
 } from '../data/tsetmc-client';
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -222,6 +223,51 @@ describe('tsetmc-client', () => {
     ).toEqual({ symbol: 'وبملت', source: 'dom' });
   });
 
+  it('does not turn an InsCode-only URL into a display or Codal symbol', () => {
+    const documentMock = {
+      querySelectorAll: vi.fn(() => []),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    const snapshot = snapshotTsetmcPage(
+      documentMock,
+      'https://www.tsetmc.com/instInfo/37204371816016200'
+    );
+
+    expect(snapshot.insCode).toBe('37204371816016200');
+    expect(snapshot.displaySymbol).toBeUndefined();
+    expect(snapshot.codalSymbol).toBeUndefined();
+  });
+
+  it('keeps InsCode and Persian symbol separate when both are available', () => {
+    const header = {
+      textContent: 'سرمایه گذاری صندوق بازنشستگی (وصندوق) - بازار اول بورس'
+    };
+    const rows = [{ textContent: 'آخرین معامله2,430 (10) [0.4%]' }];
+    const documentMock = {
+      querySelectorAll: vi.fn((selector: string) => {
+        if (selector.includes('bigheader')) return [header];
+        if (selector.includes('tr')) return rows;
+        return [];
+      }),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    const snapshot = snapshotTsetmcPage(
+      documentMock,
+      'https://www.tsetmc.com/instInfo/37204371816016200'
+    );
+
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        insCode: '37204371816016200',
+        displaySymbol: 'وصندوق',
+        codalSymbol: 'وصندوق',
+        currentPrice: 2430
+      })
+    );
+  });
+
   it('does not treat the TSETMC site title as a stock symbol', () => {
     const title = {
       textContent: '.:TSETMC:. :: مدیریت فناوری بورس تهران',
@@ -254,5 +300,14 @@ describe('tsetmc-client', () => {
 
     expect(readCurrentPriceFromDocument(documentMock)).toBe(1255);
     expect(readClosingPriceFromDocument(documentMock)).toBe(1256);
+  });
+
+  it('returns undefined price when no reliable price exists', () => {
+    const documentMock = {
+      querySelectorAll: vi.fn(() => [{ textContent: 'قیمت نامشخص' }]),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    expect(readCurrentPriceFromDocument(documentMock)).toBeUndefined();
   });
 });
