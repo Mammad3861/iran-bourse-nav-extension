@@ -25,6 +25,29 @@ function suggestion(
   };
 }
 
+function monthlyResult(extractedValues: ExtractedPortfolioValue[]): MonthlyActivityParseResult {
+  return {
+    status: 'parsed',
+    reportTitle: 'گزارش فعالیت ماهانه',
+    reportPeriod: '1405/03/31',
+    tableCandidates: [],
+    tablePreviews: [],
+    extractedValues,
+    diagnostics: {
+      reportTitle: 'گزارش فعالیت ماهانه',
+      reportDate: '1405/03/31',
+      detectedTableCount: 0,
+      parserStatus: 'parsed',
+      parserWarnings: [],
+      extractedCandidates: extractedValues,
+      rejectedCandidates: [],
+      tables: []
+    },
+    warnings: [],
+    parsedAt: '2026-06-28T00:00:00.000Z'
+  };
+}
+
 function record(): ManualOverrideRecord {
   return {
     symbol: 'وغدیر',
@@ -61,20 +84,11 @@ describe('suggestion application', () => {
   });
 
   it('applies all high-confidence suggestions but skips low-confidence suggestions', () => {
-    const parseResult: MonthlyActivityParseResult = {
-      status: 'parsed',
-      reportTitle: 'گزارش فعالیت ماهانه',
-      reportPeriod: '1405/03/31',
-      tableCandidates: [],
-      tablePreviews: [],
-      extractedValues: [
-        suggestion('listedPortfolioCostValue', 1000, 'high'),
-        suggestion('listedPortfolioMarketValue', 1500, 'high'),
-        suggestion('unlistedPortfolioSurplusSuggestion', 800, 'low')
-      ],
-      warnings: [],
-      parsedAt: '2026-06-28T00:00:00.000Z'
-    };
+    const parseResult = monthlyResult([
+      suggestion('listedPortfolioCostValue', 1000, 'high'),
+      suggestion('listedPortfolioMarketValue', 1500, 'high'),
+      suggestion('unlistedPortfolioSurplusSuggestion', 800, 'low')
+    ]);
 
     const applied = applyHighConfidenceSuggestionsToRecord(record(), parseResult, {
       symbol: 'وغدیر',
@@ -115,17 +129,10 @@ describe('suggestion application', () => {
   it('recalculates NAV from applied manual inputs', () => {
     const applied = applyHighConfidenceSuggestionsToRecord(
       record(),
-      {
-        status: 'parsed',
-        tableCandidates: [],
-        tablePreviews: [],
-        extractedValues: [
-          suggestion('listedPortfolioCostValue', 1000),
-          suggestion('listedPortfolioMarketValue', 1600)
-        ],
-        warnings: [],
-        parsedAt: '2026-06-28T00:00:00.000Z'
-      },
+      monthlyResult([
+        suggestion('listedPortfolioCostValue', 1000),
+        suggestion('listedPortfolioMarketValue', 1600)
+      ]),
       {
         symbol: 'وغدیر',
         currentPriceSource: 'manual'

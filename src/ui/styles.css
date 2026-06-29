@@ -212,6 +212,25 @@
   white-space: pre;
 }
 
+.ibnav-copy-fallback {
+  display: grid;
+  gap: 6px;
+}
+
+.ibnav-copy-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  direction: ltr;
+  font: 11px/1.6 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  border: 1px solid #a7b7b2;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8faf9;
+  color: #17211f;
+}
+
 .ibnav-apply {
   justify-self: start;
   border: 1px solid #0f766e;

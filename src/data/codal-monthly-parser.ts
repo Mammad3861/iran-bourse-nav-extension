@@ -42,11 +42,61 @@ export interface PortfolioTableCandidate {
 export interface ParserTablePreview {
   index: number;
   caption?: string;
+  detectedUnit?: string;
   headers: string[];
   rows: string[][];
   textPreview: string;
   detectedLabels: string[];
   warnings: string[];
+}
+
+export interface ParserColumnCandidate {
+  index: number;
+  label: string;
+}
+
+export interface ParserTotalRowCandidate {
+  rowIndex: number;
+  label: string;
+  cells: string[];
+  exact: boolean;
+}
+
+export interface ParserTableDiagnostics {
+  tableIndex: number;
+  caption?: string;
+  detectedUnit?: string;
+  rawHeaders: string[];
+  normalizedHeaders: string[];
+  firstRows: string[][];
+  detectedLabels: string[];
+  totalRowCandidates: ParserTotalRowCandidate[];
+  costColumnCandidates: ParserColumnCandidate[];
+  marketValueColumnCandidates: ParserColumnCandidate[];
+  failureReasons: string[];
+  textPreview: string;
+}
+
+export interface ParserRejectedCandidate {
+  tableIndex?: number;
+  reason: string;
+}
+
+export interface MonthlyActivityParserDiagnostics {
+  symbol?: string;
+  codalSymbol?: string;
+  reportTitle?: string;
+  reportDate?: string;
+  reportUrl?: string;
+  tracingNo?: string;
+  reportId?: string;
+  fetchTimestamp?: string;
+  detectedTableCount: number;
+  parserStatus: MonthlyActivityParseResult['status'];
+  parserWarnings: string[];
+  extractedCandidates: ExtractedPortfolioValue[];
+  rejectedCandidates: ParserRejectedCandidate[];
+  tables: ParserTableDiagnostics[];
 }
 
 export interface MonthlyActivityParseResult {
@@ -57,6 +107,7 @@ export interface MonthlyActivityParseResult {
   tableCandidates: PortfolioTableCandidate[];
   extractedValues: ExtractedPortfolioValue[];
   tablePreviews: ParserTablePreview[];
+  diagnostics: MonthlyActivityParserDiagnostics;
   warnings: string[];
   parsedAt: string;
 }
@@ -311,34 +362,7 @@ function tableWarnings(table: ParsedTable): string[] {
   return warnings;
 }
 
-function tablePreview(table: ParsedTable): ParserTablePreview {
-  const text = tableText(table);
-  return {
-    index: table.index,
-    caption: table.caption,
-    headers: (table.rows[0] ?? []).slice(0, 8),
-    rows: table.rows.slice(0, 4).map((row) => row.slice(0, 8)),
-    textPreview: text.slice(0, 500),
-    detectedLabels: matchedLabels(text),
-    warnings: tableWarnings(table)
-  };
-}
-
-function parseCandidateNumber(value: string): number | undefined {
-  const normalized = normalizeText(value);
-  const parenthesized = normalized.match(/^\(\s*([^)]+?)\s*\)$/);
-  const source = parenthesized ? parenthesized[1] : normalized;
-  const numbers = source.match(/[+-]?\d[\d,٬٫.\s]*/g) ?? [];
-  if (numbers.length !== 1) {
-    return undefined;
-  }
-
-  const parsed = parseLocalizedNumber(numbers[0]);
-  return parsed === undefined ? undefined : parenthesized ? -Math.abs(parsed) : parsed;
-}
-
-function unitInfoForTable(table: ParsedTable): UnitInfo {
-  const text = tableText(table);
+function unitInfoForText(text: string): UnitInfo {
   if (/میلیون\s*تومان/.test(text)) {
     return { unit: 'میلیون تومان', multiplier: 10_000_000, clear: true };
   }
@@ -360,6 +384,37 @@ function unitInfoForTable(table: ParsedTable): UnitInfo {
   };
 }
 
+function tablePreview(table: ParsedTable): ParserTablePreview {
+  const text = tableText(table);
+  return {
+    index: table.index,
+    caption: table.caption,
+    detectedUnit: unitInfoForText(text).unit,
+    headers: (table.rows[0] ?? []).slice(0, 12),
+    rows: table.rows.slice(0, 10).map((row) => row.slice(0, 12)),
+    textPreview: text.slice(0, 500),
+    detectedLabels: matchedLabels(text),
+    warnings: tableWarnings(table)
+  };
+}
+
+function parseCandidateNumber(value: string): number | undefined {
+  const normalized = normalizeText(value);
+  const parenthesized = normalized.match(/^\(\s*([^)]+?)\s*\)$/);
+  const source = parenthesized ? parenthesized[1] : normalized;
+  const numbers = source.match(/[+-]?\d[\d,٬٫.\s]*/g) ?? [];
+  if (numbers.length !== 1) {
+    return undefined;
+  }
+
+  const parsed = parseLocalizedNumber(numbers[0]);
+  return parsed === undefined ? undefined : parenthesized ? -Math.abs(parsed) : parsed;
+}
+
+function unitInfoForTable(table: ParsedTable): UnitInfo {
+  return unitInfoForText(tableText(table));
+}
+
 function findColumnIndexes(rows: string[][], patterns: RegExp[]): number[] {
   const indexes = new Set<number>();
   for (const row of rows.slice(0, 6)) {
@@ -370,6 +425,16 @@ function findColumnIndexes(rows: string[][], patterns: RegExp[]): number[] {
     });
   }
   return [...indexes];
+}
+
+function findColumnCandidates(rows: string[][], patterns: RegExp[]): ParserColumnCandidate[] {
+  return findColumnIndexes(rows, patterns).map((index) => ({
+    index,
+    label: rows
+      .slice(0, 6)
+      .map((row) => row[index])
+      .find((cell) => cell && hasAny(normalizeText(cell), patterns)) ?? ''
+  }));
 }
 
 function rowLabel(row: string[]): string {
@@ -385,6 +450,15 @@ function totalRows(rows: string[][]): Array<{ row: string[]; rowIndex: number; e
       rowIndex,
       exact: /^(جمع(?:\s*کل)?|مجموع|مانده\s*پایان\s*دوره|سرمایه\s*گذاری\s*ها|سرمایه‌گذاری\s*ها)$/.test(label)
     }));
+}
+
+function totalRowCandidatesForDiagnostics(rows: string[][]): ParserTotalRowCandidate[] {
+  return totalRows(rows).map((candidate) => ({
+    rowIndex: candidate.rowIndex,
+    label: rowLabel(candidate.row),
+    cells: candidate.row,
+    exact: candidate.exact
+  }));
 }
 
 function fallbackNumericRows(rows: string[][], columnIndex: number): Array<{ row: string[]; rowIndex: number; exact: boolean }> {
@@ -551,21 +625,126 @@ function extractionFailureWarnings(candidates: PortfolioTableCandidate[], tables
   return [...warnings];
 }
 
+function tableFailureReasons(table: ParsedTable): string[] {
+  const reasons = new Set<string>(tableWarnings(table));
+  const rows = totalRows(table.rows);
+  const costColumns = findColumnIndexes(table.rows, labelPatterns.listedPortfolioCostValue);
+  const marketColumns = findColumnIndexes(table.rows, labelPatterns.listedPortfolioMarketValue);
+  const unitInfo = unitInfoForTable(table);
+
+  if (!hasAny(tableText(table), portfolioSignals)) {
+    reasons.add('این جدول برچسب پرتفوی یا سرمایه گذاری کافی ندارد.');
+  }
+  if (rows.length === 0) {
+    reasons.add('ردیف جمع، مجموع، مانده پایان دوره یا سرمایه گذاری ها پیدا نشد.');
+  }
+  if (rows.length > 1) {
+    reasons.add('چند ردیف جمع/مجموع پیدا شد و نتیجه ممکن است مبهم باشد.');
+  }
+  if (costColumns.length === 0) {
+    reasons.add('ستون بهای تمام شده یا مبلغ تمام شده پیدا نشد.');
+  }
+  if (marketColumns.length === 0) {
+    reasons.add('ستون ارزش بازار، ارزش روز یا مبلغ بازار پیدا نشد.');
+  }
+  if (!unitInfo.clear) {
+    reasons.add('واحد گزارش مشخص نیست؛ مقدار خام فقط برای بررسی دستی مناسب است.');
+  }
+
+  return [...reasons];
+}
+
+function tableDiagnostics(table: ParsedTable): ParserTableDiagnostics {
+  const text = tableText(table);
+  const unitInfo = unitInfoForTable(table);
+  const headers = table.rows[0] ?? [];
+
+  return {
+    tableIndex: table.index,
+    caption: table.caption,
+    detectedUnit: unitInfo.unit,
+    rawHeaders: headers,
+    normalizedHeaders: headers.map(normalizeText),
+    firstRows: table.rows.slice(0, 10).map((row) => row.slice(0, 12)),
+    detectedLabels: matchedLabels(text),
+    totalRowCandidates: totalRowCandidatesForDiagnostics(table.rows).map((candidate) => ({
+      ...candidate,
+      cells: candidate.cells.slice(0, 12)
+    })),
+    costColumnCandidates: findColumnCandidates(table.rows, labelPatterns.listedPortfolioCostValue),
+    marketValueColumnCandidates: findColumnCandidates(table.rows, labelPatterns.listedPortfolioMarketValue),
+    failureReasons: tableFailureReasons(table),
+    textPreview: text.slice(0, 700)
+  };
+}
+
+function rejectedCandidatesForDiagnostics(
+  tables: ParsedTable[],
+  extractedValues: ExtractedPortfolioValue[],
+  warnings: string[]
+): ParserRejectedCandidate[] {
+  const extractedTableIndexes = new Set(extractedValues.map((value) => value.sourceTableIndex));
+  const rejected: ParserRejectedCandidate[] = [];
+
+  for (const table of tables) {
+    const reasons = tableFailureReasons(table);
+    if (!extractedTableIndexes.has(table.index) || reasons.length > 0) {
+      rejected.push(
+        ...reasons.map((reason) => ({
+          tableIndex: table.index,
+          reason
+        }))
+      );
+    }
+  }
+
+  rejected.push(...warnings.map((reason) => ({ reason })));
+  return rejected;
+}
+
+function buildDiagnostics(options: {
+  detail: CodalReportDetail;
+  status: MonthlyActivityParseResult['status'];
+  tables: ParsedTable[];
+  warnings: string[];
+  extractedValues: ExtractedPortfolioValue[];
+}): MonthlyActivityParserDiagnostics {
+  return {
+    symbol: options.detail.symbol,
+    codalSymbol: options.detail.symbol,
+    reportTitle: options.detail.title,
+    reportDate: options.detail.publishedAt ?? extractReportPeriod(options.detail),
+    reportUrl: options.detail.sourceUrl,
+    tracingNo: options.detail.tracingNo,
+    reportId: options.detail.reportId,
+    fetchTimestamp: options.detail.fetchedAt,
+    detectedTableCount: options.tables.length,
+    parserStatus: options.status,
+    parserWarnings: options.warnings,
+    extractedCandidates: options.extractedValues,
+    rejectedCandidates: rejectedCandidatesForDiagnostics(options.tables, options.extractedValues, options.warnings),
+    tables: options.tables.map(tableDiagnostics)
+  };
+}
+
 export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyActivityParseResult {
   const warnings: string[] = [];
   const parsedAt = new Date().toISOString();
   const title = detail.title ?? '';
 
   if (title && !isMonthlyActivityReport(title)) {
+    const status: MonthlyActivityParseResult['status'] = 'unsupported-report';
+    const resultWarnings = ['عنوان گزارش شبیه گزارش فعالیت ماهانه نیست.'];
     return {
-      status: 'unsupported-report',
+      status,
       reportTitle: detail.title,
       reportPeriod: extractReportPeriod(detail),
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
       tablePreviews: [],
-      warnings: ['عنوان گزارش شبیه گزارش فعالیت ماهانه نیست.'],
+      diagnostics: buildDiagnostics({ detail, status, tables: [], warnings: resultWarnings, extractedValues: [] }),
+      warnings: resultWarnings,
       parsedAt
     };
   }
@@ -578,30 +757,36 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   const tablePreviews = tables.map(tablePreview);
 
   if (tables.length === 0) {
+    const status: MonthlyActivityParseResult['status'] = 'empty';
+    const resultWarnings = ['هیچ جدول قابل بررسی در گزارش پیدا نشد.'];
     return {
-      status: 'empty',
+      status,
       reportTitle: detail.title,
       reportPeriod: extractReportPeriod(detail),
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
       tablePreviews: [],
-      warnings: ['هیچ جدول قابل بررسی در گزارش پیدا نشد.'],
+      diagnostics: buildDiagnostics({ detail, status, tables, warnings: resultWarnings, extractedValues: [] }),
+      warnings: resultWarnings,
       parsedAt
     };
   }
 
   const candidates = tables.map(classifyTable).filter((item): item is PortfolioTableCandidate => Boolean(item));
   if (candidates.length === 0) {
+    const status: MonthlyActivityParseResult['status'] = 'no-candidate-table';
+    const resultWarnings = ['جدول پرتفوی بورسی یا غیربورسی با اطمینان کافی پیدا نشد.'];
     return {
-      status: 'no-candidate-table',
+      status,
       reportTitle: detail.title,
       reportPeriod: extractReportPeriod(detail),
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
       tablePreviews,
-      warnings: ['جدول پرتفوی بورسی یا غیربورسی با اطمینان کافی پیدا نشد.'],
+      diagnostics: buildDiagnostics({ detail, status, tables, warnings: resultWarnings, extractedValues: [] }),
+      warnings: resultWarnings,
       parsedAt
     };
   }
@@ -662,14 +847,18 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     warnings.push('جدول مرتبط پیدا شد، اما مقدار عددی قابل اتکا استخراج نشد. پیش‌نمایش جدول‌ها را برای برچسب‌ها و ردیف‌های جمع بررسی کنید.');
   }
 
+  const status: MonthlyActivityParseResult['status'] =
+    duplicateKinds.length > 0 ? 'ambiguous' : safeExtractedValues.length > 0 ? 'parsed' : 'ambiguous';
+
   return {
-    status: duplicateKinds.length > 0 ? 'ambiguous' : safeExtractedValues.length > 0 ? 'parsed' : 'ambiguous',
+    status,
     reportTitle: detail.title,
     reportPeriod: extractReportPeriod(detail),
     sourceReportUrl: detail.sourceUrl,
     tableCandidates: candidates,
     extractedValues: safeExtractedValues,
     tablePreviews,
+    diagnostics: buildDiagnostics({ detail, status, tables, warnings, extractedValues: safeExtractedValues }),
     warnings,
     parsedAt
   };

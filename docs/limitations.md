@@ -20,6 +20,8 @@ This extension provides an estimate, not an audited valuation.
 - Unsupported Codal report formats are expected and should not block manual NAV calculations.
 - Codal monthly parser outputs are suggestions only and can be wrong when labels are ambiguous, report formats vary, units differ, numbers are malformed, or tables contain totals/subtotals in unexpected places.
 - Parser diagnostics expose a small normalized preview of public Codal table content to help review labels and candidate values; the preview is not proof that the extracted value is correct.
+- Parser diagnostics are visible in the widget/popup and can be copied as JSON or compact table-preview text. If browser clipboard access is unavailable, the extension shows a textarea fallback for manual copy.
+- Diagnostics include public Codal report metadata, detected table headers, first rows, candidate labels, and failure reasons. They do not include manual NAV inputs.
 - Numeric extraction prefers clear total rows such as `جمع`, `جمع کل`, `مجموع`, and `مانده پایان دوره`. Multiple total rows, duplicate candidates, or unclear labels are intentionally downgraded.
 - The parser recognizes explicit unit hints such as `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان`. If the unit is unclear, it keeps the raw value, adds a warning, and avoids high-confidence bulk apply.
 - The parser preserves empty cells inside detected rows to keep Codal cost/market columns aligned, but unusual merged-cell layouts can still confuse extraction.

@@ -136,6 +136,14 @@ After building the project:
 4. Select the `dist` folder.
 5. Open a supported TSETMC symbol page and check the NAV widget.
 
+## Troubleshooting Parser Diagnostics
+
+When Codal report detail is fetched but values are not extracted, open the NAV widget or popup and expand `نمایش جزئیات تشخیص Parser`.
+
+The diagnostics section shows each detected table, detected unit, labels, first rows, total-row candidates, cost-column candidates, market-value-column candidates, and extraction failure reasons. Use `کپی تشخیص Parser` to copy a readable JSON payload, or `کپی پیش‌نمایش جدول‌ها` to copy a compact text preview. If the browser blocks clipboard access, the extension shows a textarea fallback for manual copy.
+
+Diagnostics contain only public Codal report content already fetched by the extension. Manual NAV inputs are not included.
+
 ## Project Structure
 
 ```text

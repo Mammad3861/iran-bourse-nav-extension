@@ -381,6 +381,22 @@ describe('parseMonthlyActivityReport', () => {
 
     expect(result.status).toBe('parsed');
     expect(result.tableCandidates.map((candidate) => candidate.index)).toContain(2);
+    expect(result.diagnostics.detectedTableCount).toBe(5);
+    expect(result.diagnostics.symbol).toBe('وصندوق');
+    expect(result.diagnostics.tables[2]).toEqual(
+      expect.objectContaining({
+        tableIndex: 2,
+        rawHeaders: ['نام شرکت', 'تعداد سهام', 'بهای تمام شده', 'ارزش بازار', 'افزایش/کاهش'],
+        firstRows: expect.arrayContaining([
+          ['مانده پایان دوره', '', '6,000', '8,000', '2,000']
+        ]),
+        totalRowCandidates: expect.arrayContaining([
+          expect.objectContaining({ rowIndex: 3, label: 'مانده پایان دوره' })
+        ]),
+        costColumnCandidates: expect.arrayContaining([expect.objectContaining({ index: 2 })]),
+        marketValueColumnCandidates: expect.arrayContaining([expect.objectContaining({ index: 3 })])
+      })
+    );
     expect(result.extractedValues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

@@ -14,6 +14,7 @@ import {
 } from '../data/codal-monthly-parser';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
 import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
+import { copyTextWithFallback, parserDiagnosticsJson, parserTablePreviewText } from '../ui/parser-diagnostics';
 import '../ui/styles.css';
 
 function setText(selector: string, value: string): void {
@@ -102,13 +103,65 @@ function suggestionText(value: ExtractedPortfolioValue): string {
   return `${value.label}: ${formatNumberFa(value.value)} (${confidence}، جدول ${value.sourceTableIndex}${unit})`;
 }
 
+function showManualCopyFallback(container: HTMLElement, text: string): void {
+  container.querySelector('[data-popup-copy-fallback]')?.remove();
+  const wrapper = document.createElement('div');
+  wrapper.className = 'ibnav-copy-fallback';
+  wrapper.dataset.popupCopyFallback = 'true';
+  const hint = document.createElement('p');
+  hint.className = 'ibnav-muted';
+  hint.textContent = 'کپی خودکار در دسترس نبود؛ متن زیر را دستی کپی کنید.';
+  const textarea = document.createElement('textarea');
+  textarea.className = 'ibnav-copy-textarea';
+  textarea.readOnly = true;
+  textarea.value = text;
+  wrapper.append(hint, textarea);
+  container.appendChild(wrapper);
+  textarea.focus();
+  textarea.select();
+}
+
 function appendMonthlyDiagnostics(list: HTMLElement, result: MonthlyActivityParseResult): void {
   const preview = document.createElement('div');
   preview.className = 'ibnav-diagnostics';
   const title = document.createElement('h5');
   title.className = 'ibnav-subtitle';
-  title.textContent = 'پیش‌نمایش جدول‌های شناسایی‌شده';
+  title.textContent = 'نمایش جزئیات تشخیص Parser';
   preview.appendChild(title);
+
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'ibnav-apply ibnav-secondary';
+  copyButton.textContent = 'کپی تشخیص Parser';
+  copyButton.addEventListener('click', async () => {
+    const outcome = await copyTextWithFallback(parserDiagnosticsJson(result), window.navigator.clipboard, (text) =>
+      showManualCopyFallback(preview, text)
+    );
+    setText(
+      '[data-popup-suggestions="warnings"]',
+      outcome === 'copied'
+        ? 'تشخیص Parser کپی شد.'
+        : 'کپی خودکار انجام نشد؛ متن تشخیص برای کپی دستی نمایش داده شد.'
+    );
+  });
+  preview.appendChild(copyButton);
+
+  const copyPreviewButton = document.createElement('button');
+  copyPreviewButton.type = 'button';
+  copyPreviewButton.className = 'ibnav-apply ibnav-secondary';
+  copyPreviewButton.textContent = 'کپی پیش‌نمایش جدول‌ها';
+  copyPreviewButton.addEventListener('click', async () => {
+    const outcome = await copyTextWithFallback(parserTablePreviewText(result), window.navigator.clipboard, (text) =>
+      showManualCopyFallback(preview, text)
+    );
+    setText(
+      '[data-popup-suggestions="warnings"]',
+      outcome === 'copied'
+        ? 'پیش‌نمایش جدول‌ها کپی شد.'
+        : 'کپی خودکار انجام نشد؛ پیش‌نمایش برای کپی دستی نمایش داده شد.'
+    );
+  });
+  preview.appendChild(copyPreviewButton);
 
   if (result.tablePreviews.length === 0) {
     const empty = document.createElement('p');
@@ -117,7 +170,7 @@ function appendMonthlyDiagnostics(list: HTMLElement, result: MonthlyActivityPars
     preview.appendChild(empty);
   }
 
-  for (const table of result.tablePreviews.slice(0, 3)) {
+  for (const table of result.tablePreviews) {
     const item = document.createElement('details');
     item.className = 'ibnav-table-preview';
     const summary = document.createElement('summary');
@@ -125,8 +178,22 @@ function appendMonthlyDiagnostics(list: HTMLElement, result: MonthlyActivityPars
     item.appendChild(summary);
     const meta = document.createElement('p');
     meta.className = 'ibnav-muted';
-    meta.textContent = `برچسب‌ها: ${table.detectedLabels.join('، ') || 'نامشخص'}`;
+    meta.textContent = `واحد: ${table.detectedUnit ?? 'نامشخص'} | برچسب‌ها: ${
+      table.detectedLabels.join('، ') || 'نامشخص'
+    } | هشدار: ${table.warnings.join('، ') || '-'}`;
     item.appendChild(meta);
+    const diagnostic = result.diagnostics.tables.find((diagnosticTable) => diagnosticTable.tableIndex === table.index);
+    if (diagnostic) {
+      const details = document.createElement('p');
+      details.className = 'ibnav-muted';
+      details.textContent = [
+        `ردیف‌های جمع: ${diagnostic.totalRowCandidates.map((row) => `${row.rowIndex + 1}:${row.label}`).join('، ') || '-'}`,
+        `ستون بهای تمام‌شده: ${diagnostic.costColumnCandidates.map((column) => `${column.index + 1}:${column.label}`).join('، ') || '-'}`,
+        `ستون ارزش بازار: ${diagnostic.marketValueColumnCandidates.map((column) => `${column.index + 1}:${column.label}`).join('، ') || '-'}`,
+        `دلیل عدم استخراج: ${diagnostic.failureReasons.join('، ') || '-'}`
+      ].join(' | ');
+      item.appendChild(details);
+    }
     const rows = document.createElement('pre');
     rows.className = 'ibnav-preview-code';
     rows.textContent = table.rows.map((row) => row.join(' | ')).join('\n');
