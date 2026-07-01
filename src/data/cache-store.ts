@@ -1,5 +1,6 @@
 import { storageKeyForSymbol } from '../core/symbol-utils';
 import type { ManualOverrideRecord } from './manual-overrides';
+import { normalizeManualOverrideRecord } from './manual-overrides';
 
 const memoryStore = new Map<string, unknown>();
 
@@ -27,12 +28,13 @@ export async function setLocalValue<T>(key: string, value: T): Promise<void> {
 
 export async function getManualOverride(symbol: string): Promise<ManualOverrideRecord | undefined> {
   const key = storageKeyForSymbol(symbol);
-  return getLocalValue<ManualOverrideRecord>(key);
+  const record = await getLocalValue<ManualOverrideRecord>(key);
+  return record ? normalizeManualOverrideRecord(record) : undefined;
 }
 
 export async function saveManualOverride(record: ManualOverrideRecord): Promise<void> {
   const key = storageKeyForSymbol(record.symbol);
-  await setLocalValue(key, record);
+  await setLocalValue(key, normalizeManualOverrideRecord(record));
 }
 
 export async function getActiveSymbol(): Promise<string | undefined> {

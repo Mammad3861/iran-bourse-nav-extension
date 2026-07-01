@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateNav } from '../core/nav-calculator';
+import { analyzeNavCompleteness, calculateNav } from '../core/nav-calculator';
 
 describe('calculateNav', () => {
   it('calculates total NAV from equity and portfolio surplus values', () => {
@@ -43,5 +43,72 @@ describe('calculateNav', () => {
 
     expect(result.navPerShare).toBe(10);
     expect(result.pToNav).toBeNull();
+  });
+
+  it('warns when listed cost is entered without listed market value', () => {
+    const analysis = analyzeNavCompleteness({
+      equity: undefined,
+      listedPortfolioMarketValue: undefined,
+      listedPortfolioCostValue: 136_494_769,
+      unlistedPortfolioSurplus: undefined,
+      totalShares: undefined
+    });
+
+    expect(analysis.status).toBe('needs-review');
+    expect(analysis.warnings).toEqual(
+      expect.arrayContaining([
+        'محاسبه NAV ناقص است؛ بهای تمام‌شده وارد شده اما ارزش روز پرتفوی بورسی وارد نشده است.',
+        'حقوق صاحبان سهام وارد نشده است.',
+        'تعداد کل سهام وارد نشده است؛ NAV هر سهم و P/NAV محاسبه نمی‌شود.',
+        'NAV منفی به دلیل ناقص بودن ورودی‌هاست، نه لزوماً نتیجه واقعی.'
+      ])
+    );
+    expect(analysis.navTotalAvailable).toBe(false);
+  });
+
+  it('warns when listed market value is entered without listed cost', () => {
+    const analysis = analyzeNavCompleteness({
+      equity: 100,
+      listedPortfolioMarketValue: 500,
+      listedPortfolioCostValue: undefined,
+      unlistedPortfolioSurplus: 0,
+      totalShares: 10
+    });
+
+    expect(analysis.status).toBe('needs-review');
+    expect(analysis.warnings).toContain('محاسبه NAV ناقص است؛ ارزش روز وارد شده اما بهای تمام‌شده وارد نشده است.');
+  });
+
+  it('treats typed zero as a real explicit value', () => {
+    const analysis = analyzeNavCompleteness({
+      equity: 100,
+      listedPortfolioMarketValue: 0,
+      listedPortfolioCostValue: 50,
+      unlistedPortfolioSurplus: 0,
+      totalShares: 10
+    });
+
+    expect(analysis.navTotalAvailable).toBe(true);
+    expect(analysis.explicitZeroFields).toEqual(
+      expect.arrayContaining(['listedPortfolioMarketValue', 'unlistedPortfolioSurplus'])
+    );
+    expect(analysis.warnings).toContain(
+      'ارزش روز پرتفوی بورسی صفر ثبت شده در حالی که بهای تمام‌شده مثبت است؛ مقدار را بررسی کنید.'
+    );
+  });
+
+  it('marks complete inputs as complete', () => {
+    const analysis = analyzeNavCompleteness({
+        equity: 1000,
+        listedPortfolioMarketValue: 500,
+        listedPortfolioCostValue: 400,
+        unlistedPortfolioSurplus: 0,
+        totalShares: 100
+      });
+
+    expect(analysis.status).toBe('complete');
+    expect(analysis.warnings).toEqual([]);
+    expect(analysis.navTotalAvailable).toBe(true);
+    expect(analysis.missingFields).toEqual([]);
   });
 });

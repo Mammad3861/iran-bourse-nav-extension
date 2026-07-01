@@ -274,6 +274,164 @@ describe('parseMonthlyActivityReport', () => {
     );
   });
 
+  it('reconstructs flattened Codal technical cell rows before parsing business values', () => {
+    const technicalHeaders = [
+      'metaTableId',
+      'metaTableCode',
+      'address',
+      'cellGroupName',
+      'rowSequence',
+      'columnSequence',
+      'value'
+    ];
+    const result = parseMonthlyActivityReport(
+      detail({
+        extractedTables: [
+          {
+            index: 3,
+            source: 'json',
+            caption: 'SummaryOfCompanyInvestments - سرمایه گذاری های شرکت',
+            headers: technicalHeaders,
+            rows: [
+              technicalHeaders,
+              ['3848', '2570', 'A1', 'SummaryOfCompanyInvestments', '1', '1', 'شرح'],
+              ['3848', '2570', 'B1', 'SummaryOfCompanyInvestments', '1', '2', 'بهای تمام شده'],
+              [
+                '3848',
+                '2570',
+                'A2',
+                'SummaryOfCompanyInvestments',
+                '2',
+                '1',
+                'سهام شرکت های قابل معامله در بازار سرمایه'
+              ],
+              ['3848', '2570', 'B2', 'SummaryOfCompanyInvestments', '2', '2', '۱۰۰'],
+              ['3848', '2570', 'A3', 'SummaryOfCompanyInvestments', '3', '1', 'جمع'],
+              ['3848', '2570', 'B3', 'SummaryOfCompanyInvestments', '3', '2', '۱۰۰']
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(result.status).toBe('parsed');
+    expect(result.diagnostics.tables[0]).toEqual(
+      expect.objectContaining({
+        source: 'codal-cell-model',
+        reconstruction: expect.objectContaining({
+          metaTableCode: '2570',
+          metaTableId: '3848',
+          rawCellCount: 6,
+          rowCount: 3,
+          columnCount: 2
+        }),
+        normalizedHeaders: ['شرح', 'بهای تمام شده'],
+        firstNormalizedRows: expect.arrayContaining([
+          ['سهام شرکت های قابل معامله در بازار سرمایه', '100'],
+          ['جمع', '100']
+        ]),
+        costColumnCandidates: [expect.objectContaining({ index: 1, label: 'بهای تمام شده' })],
+        totalRowCandidates: [expect.objectContaining({ rowIndex: 2, label: 'جمع' })],
+        marketValueColumnCandidates: [],
+        failureReasons: expect.arrayContaining(['ستون ارزش بازار در جدول بازسازی‌شده پیدا نشد.'])
+      })
+    );
+    expect(result.diagnostics.tables[0].normalizedHeaders).not.toContain('metaTableId');
+    expect(result.diagnostics.tables[0].normalizedHeaders).not.toContain('address');
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'listedPortfolioCostValue',
+          value: 100,
+          sourceTableIndex: 3,
+          sourceRowIndex: 2,
+          sourceColumnIndex: 1
+        })
+      ])
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioMarketValue' })])
+    );
+    expect(result.warnings).toContain('جدول 3: ستون ارزش بازار در جدول بازسازی‌شده پیدا نشد.');
+  });
+
+  it('selects the current-period non-zero aggregate from reconstructed investment summary tables', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        extractedTables: [
+          {
+            index: 3,
+            source: 'codal-cell-model',
+            caption: 'SummaryOfCompanyInvestments - سرمایه گذاری های شرکت',
+            headers: [
+              'شرح',
+              'دوره مالی منتهی به 1405/03/31',
+              'سال مالی منتهی به 1404/12/29'
+            ],
+            rows: [
+              ['شرح', 'دوره مالی منتهی به 1405/03/31', 'سال مالی منتهی به 1404/12/29'],
+              ['', 'بهای تمام شده', 'بهای تمام شده'],
+              ['جمع', '۰', '۰'],
+              ['پذیرفته شده در بورس', '۰', '۰'],
+              ['سهام شرکت های قابل معامله در بازار سرمایه', '136,494,769', '135,404,798'],
+              ['جمع', '136,494,769', '135,404,798']
+            ],
+            reconstruction: {
+              kind: 'codal-cell-model',
+              metaTableCode: '2570',
+              metaTableId: '3848',
+              alias: 'SummaryOfCompanyInvestments',
+              rawCellCount: 18,
+              rowCount: 6,
+              columnCount: 3,
+              warnings: []
+            }
+          }
+        ]
+      })
+    );
+
+    const costValues = result.extractedValues.filter((value) => value.kind === 'listedPortfolioCostValue');
+
+    expect(result.status).toBe('parsed');
+    expect(costValues).toHaveLength(1);
+    expect(costValues[0]).toEqual(
+      expect.objectContaining({
+        value: 136_494_769,
+        confidence: 'medium',
+        period: '1405/03/31',
+        periodLabel: 'دوره مالی منتهی به 1405/03/31',
+        sourceTableIndex: 3,
+        sourceRowIndex: 5,
+        sourceColumnIndex: 1,
+        unit: 'نامشخص',
+        warning: expect.stringContaining('واحد')
+      })
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 0 })])
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 135_404_798 })])
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioMarketValue' })])
+    );
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('دوره قبلی'),
+        expect.stringContaining('کاندید صفر'),
+        'جدول 3: ستون ارزش بازار در جدول بازسازی‌شده پیدا نشد.'
+      ])
+    );
+    expect(result.diagnostics.rejectedCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: expect.stringContaining('1404/12/29') }),
+        expect.objectContaining({ reason: expect.stringContaining('کاندید صفر') })
+      ])
+    );
+  });
+
   it('supports Arabic digits, commas, whitespace, and parenthesized negative values', () => {
     const result = parseMonthlyActivityReport(
       detail({

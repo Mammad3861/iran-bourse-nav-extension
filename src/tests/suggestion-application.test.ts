@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { calculateNav, emptyNavInputs } from '../core/nav-calculator';
+import { analyzeNavCompleteness, calculateNav, emptyNavInputs } from '../core/nav-calculator';
 import { getManualOverride, saveManualOverride } from '../data/cache-store';
 import type { ExtractedPortfolioValue, MonthlyActivityParseResult } from '../data/codal-monthly-parser';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
+import { manualFieldMetadata, normalizeManualOverrideRecord } from '../data/manual-overrides';
 import {
   applyHighConfidenceSuggestionsToRecord,
   applySuggestionToRecord,
-  markFieldAsManual
+  markFieldAsManual,
+  resetCodalSuggestionFields
 } from '../data/suggestion-application';
 
 function suggestion(
   kind: ExtractedPortfolioValue['kind'],
   value: number,
-  confidence: ExtractedPortfolioValue['confidence'] = 'high'
+  confidence: ExtractedPortfolioValue['confidence'] = 'high',
+  unit?: string
 ): ExtractedPortfolioValue {
   return {
     kind,
@@ -20,6 +23,7 @@ function suggestion(
     value,
     rawText: String(value),
     confidence,
+    unit,
     sourceTableIndex: 0,
     warning: confidence === 'low' ? 'low confidence' : undefined
   };
@@ -64,7 +68,7 @@ function record(): ManualOverrideRecord {
 
 describe('suggestion application', () => {
   it('applies one suggested value with Codal source metadata', () => {
-    const applied = applySuggestionToRecord(record(), suggestion('listedPortfolioMarketValue', 2500), {
+    const applied = applySuggestionToRecord(record(), suggestion('listedPortfolioMarketValue', 2500, 'high', 'میلیون ریال'), {
       symbol: 'وغدیر',
       currentPriceSource: 'manual',
       reportTitle: 'گزارش فعالیت ماهانه',
@@ -79,7 +83,8 @@ describe('suggestion application', () => {
       appliedAt: '2026-06-28T10:00:00.000Z',
       reportTitle: 'گزارش فعالیت ماهانه',
       reportDate: '1405/03/31',
-      confidence: 'high'
+      confidence: 'high',
+      unit: 'میلیون ریال'
     });
   });
 
@@ -100,8 +105,91 @@ describe('suggestion application', () => {
 
     expect(applied.inputs.listedPortfolioCostValue).toBe(1000);
     expect(applied.inputs.listedPortfolioMarketValue).toBe(1500);
-    expect(applied.inputs.unlistedPortfolioSurplus).toBe(0);
+    expect(applied.inputs.unlistedPortfolioSurplus).toBeUndefined();
     expect(applied.fieldSources?.unlistedPortfolioSurplus).toBeUndefined();
+  });
+
+  it('treats legacy plain zero fields without metadata as missing', () => {
+    const legacy: ManualOverrideRecord = {
+      symbol: 'وصندوق',
+      inputs: {
+        equity: 0,
+        listedPortfolioMarketValue: 0,
+        listedPortfolioCostValue: 0,
+        unlistedPortfolioSurplus: 0,
+        totalShares: 0
+      },
+      currentPriceSource: 'manual',
+      updatedAt: '2026-06-28T00:00:00.000Z'
+    };
+
+    const normalized = normalizeManualOverrideRecord(legacy);
+
+    expect(normalized.inputs.equity).toBeUndefined();
+    expect(normalized.inputs.listedPortfolioMarketValue).toBeUndefined();
+    expect(normalized.inputs.listedPortfolioCostValue).toBeUndefined();
+    expect(normalized.inputs.unlistedPortfolioSurplus).toBeUndefined();
+    expect(normalized.inputs.totalShares).toBeUndefined();
+  });
+
+  it('keeps user-entered zero when manual metadata exists', () => {
+    const recordWithExplicitZero: ManualOverrideRecord = {
+      symbol: 'وصندوق',
+      inputs: {
+        equity: 100,
+        listedPortfolioMarketValue: 0,
+        listedPortfolioCostValue: 50,
+        unlistedPortfolioSurplus: 0,
+        totalShares: 10
+      },
+      currentPriceSource: 'manual',
+      updatedAt: '2026-06-28T00:00:00.000Z',
+      fieldSources: {
+        listedPortfolioMarketValue: manualFieldMetadata(0, '2026-06-28T00:00:00.000Z'),
+        unlistedPortfolioSurplus: manualFieldMetadata(0, '2026-06-28T00:00:00.000Z')
+      }
+    };
+
+    const normalized = normalizeManualOverrideRecord(recordWithExplicitZero);
+    const analysis = analyzeNavCompleteness(normalized.inputs);
+
+    expect(normalized.inputs.listedPortfolioMarketValue).toBe(0);
+    expect(normalized.inputs.unlistedPortfolioSurplus).toBe(0);
+    expect(analysis.explicitZeroFields).toEqual(
+      expect.arrayContaining(['listedPortfolioMarketValue', 'unlistedPortfolioSurplus'])
+    );
+    expect(analysis.warnings).toContain(
+      'ارزش روز پرتفوی بورسی صفر ثبت شده در حالی که بهای تمام‌شده مثبت است؛ مقدار را بررسی کنید.'
+    );
+  });
+
+  it('applying Codal cost to a legacy zero record does not make other fields explicit zero', () => {
+    const legacy: ManualOverrideRecord = {
+      symbol: 'وصندوق',
+      inputs: {
+        equity: 0,
+        listedPortfolioMarketValue: 0,
+        listedPortfolioCostValue: 0,
+        unlistedPortfolioSurplus: 0,
+        totalShares: 0
+      },
+      currentPriceSource: 'manual',
+      updatedAt: '2026-06-28T00:00:00.000Z'
+    };
+
+    const applied = applySuggestionToRecord(legacy, suggestion('listedPortfolioCostValue', 136_494_769), {
+      symbol: 'وصندوق',
+      currentPriceSource: 'manual',
+      appliedAt: '2026-06-28T10:00:00.000Z'
+    });
+    const analysis = analyzeNavCompleteness(applied.inputs);
+
+    expect(applied.inputs.listedPortfolioCostValue).toBe(136_494_769);
+    expect(applied.inputs.listedPortfolioMarketValue).toBeUndefined();
+    expect(applied.inputs.equity).toBeUndefined();
+    expect(applied.inputs.totalShares).toBeUndefined();
+    expect(analysis.navTotalAvailable).toBe(false);
+    expect(analysis.explicitZeroFields).toEqual([]);
   });
 
   it('manual edit overrides Codal source metadata', () => {
@@ -122,7 +210,8 @@ describe('suggestion application', () => {
     expect(edited.fieldSources?.listedPortfolioMarketValue).toEqual({
       value: 2600,
       source: 'manual',
-      appliedAt: '2026-06-28T11:00:00.000Z'
+      appliedAt: '2026-06-28T11:00:00.000Z',
+      touchedByUser: true
     });
   });
 
@@ -158,5 +247,22 @@ describe('suggestion application', () => {
 
     expect(saved?.inputs.listedPortfolioCostValue).toBe(900);
     expect(saved?.fieldSources?.listedPortfolioCostValue?.source).toBe('codal-suggestion');
+  });
+
+  it('reset Codal-applied values only clears Codal suggestion fields', () => {
+    const current = applySuggestionToRecord(record(), suggestion('listedPortfolioCostValue', 900), {
+      symbol: 'وغدیر',
+      currentPriceSource: 'manual',
+      appliedAt: '2026-06-28T10:00:00.000Z'
+    });
+    const withManual = markFieldAsManual(current, 'equity', 2000, '2026-06-28T11:00:00.000Z');
+
+    const reset = resetCodalSuggestionFields(withManual, '2026-06-28T12:00:00.000Z');
+
+    expect(reset.inputs.listedPortfolioCostValue).toBeUndefined();
+    expect(reset.fieldSources?.listedPortfolioCostValue).toBeUndefined();
+    expect(reset.inputs.equity).toBe(2000);
+    expect(reset.fieldSources?.equity?.source).toBe('manual');
+    expect(reset.updatedAt).toBe('2026-06-28T12:00:00.000Z');
   });
 });

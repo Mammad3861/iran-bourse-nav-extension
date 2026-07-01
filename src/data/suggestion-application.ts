@@ -2,6 +2,7 @@ import type { NavInputs } from '../core/nav-calculator';
 import { emptyNavInputs } from '../core/nav-calculator';
 import type { ExtractedPortfolioValue, MonthlyActivityParseResult, PortfolioValueKind } from './codal-monthly-parser';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from './manual-overrides';
+import { manualFieldMetadata, normalizeManualOverrideRecord } from './manual-overrides';
 
 export interface SuggestionApplyContext {
   symbol: string;
@@ -28,7 +29,8 @@ export function sourceMetadataForSuggestion(
     appliedAt: context.appliedAt ?? new Date().toISOString(),
     reportTitle: context.reportTitle,
     reportDate: context.reportDate,
-    confidence: suggestion.confidence
+    confidence: suggestion.confidence,
+    unit: suggestion.unit
   };
 }
 
@@ -36,12 +38,13 @@ function baseRecord(
   current: ManualOverrideRecord | undefined,
   context: SuggestionApplyContext
 ): ManualOverrideRecord {
+  const normalizedCurrent = current ? normalizeManualOverrideRecord(current) : undefined;
   return {
     symbol: context.symbol,
-    inputs: current?.inputs ?? emptyNavInputs(),
-    currentPriceSource: current?.currentPriceSource ?? context.currentPriceSource,
-    updatedAt: current?.updatedAt ?? new Date().toISOString(),
-    fieldSources: { ...(current?.fieldSources ?? {}) }
+    inputs: normalizedCurrent?.inputs ?? emptyNavInputs(),
+    currentPriceSource: normalizedCurrent?.currentPriceSource ?? context.currentPriceSource,
+    updatedAt: normalizedCurrent?.updatedAt ?? new Date().toISOString(),
+    fieldSources: { ...(normalizedCurrent?.fieldSources ?? {}) }
   };
 }
 
@@ -88,17 +91,37 @@ export function markFieldAsManual(
   if (value === undefined) {
     delete fieldSources[field];
   } else {
-    fieldSources[field] = {
-      value,
-      source: 'manual',
-      appliedAt: editedAt
-    };
+    fieldSources[field] = manualFieldMetadata(value, editedAt);
   }
 
   return {
     ...current,
-    inputs: { ...current.inputs, [field]: value ?? (field === 'currentPrice' ? undefined : 0) },
+    inputs: { ...current.inputs, [field]: value },
     fieldSources,
     updatedAt: editedAt
+  };
+}
+
+export function resetCodalSuggestionFields(current: ManualOverrideRecord, resetAt = new Date().toISOString()): ManualOverrideRecord {
+  const inputs = { ...current.inputs };
+  const fieldSources = { ...(current.fieldSources ?? {}) };
+
+  for (const field of Object.keys(fieldSources) as Array<keyof NavInputs>) {
+    if (fieldSources[field]?.source !== 'codal-suggestion') {
+      continue;
+    }
+    if (field === 'currentPrice') {
+      inputs.currentPrice = undefined;
+    } else {
+      inputs[field] = undefined;
+    }
+    delete fieldSources[field];
+  }
+
+  return {
+    ...current,
+    inputs,
+    fieldSources,
+    updatedAt: resetAt
   };
 }

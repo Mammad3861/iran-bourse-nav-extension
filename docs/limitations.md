@@ -27,12 +27,18 @@ This extension provides an estimate, not an audited valuation.
 - Parser diagnostics are visible in the widget/popup and can be copied as JSON or compact Markdown/text table-preview output. If browser clipboard access is unavailable, the extension shows a textarea fallback for manual copy.
 - Diagnostics include public Codal report metadata, report-selection diagnostics, detected raw/normalized table headers, first raw/normalized rows, Codal cell-model reconstruction metadata when available, candidate labels, rejected candidates, and failure reasons. They do not include manual NAV inputs.
 - Numeric extraction prefers clear total rows such as `جمع`, `جمع کل`, `مجموع`, and `مانده پایان دوره`. Multiple total rows, duplicate candidates, or unclear labels are intentionally downgraded.
+- For reconstructed investment tables with multi-row headers, the parser prefers columns matching the report period and rejects prior-year columns from the main current-period suggestion. Zero aggregate candidates are rejected when a non-zero aggregate candidate exists.
 - The parser recognizes explicit unit hints such as `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان`. If the unit is unclear, it keeps the raw value, adds a warning, and avoids high-confidence bulk apply.
 - The parser preserves empty cells inside detected rows to keep Codal cost/market columns aligned, but unusual merged-cell layouts can still confuse extraction.
 - The parser does not infer missing units, audit restatements, capital increases, or post-report adjustments.
 - Unlisted portfolio surplus suggestions are low confidence because they are derived from reported cost and estimated values and may not match the project’s NAV assumptions.
 - Parsed Codal values never overwrite manual inputs automatically.
+- Blank manual inputs are treated as missing values, not real zero values. Users must type `0` when a field is intentionally zero.
+- Legacy records that only contain default-looking `0` values without manual or Codal source metadata are treated as missing values during loading/migration.
+- Applying a partial Codal suggestion, such as listed portfolio cost without listed portfolio market value, can make the NAV arithmetic negative or incomplete. The UI marks these cases as incomplete or needing manual review instead of treating the result as final.
+- Incomplete NAV is not shown as a final numeric estimate. NAV total, NAV/share, and P/NAV remain unavailable until required inputs are present.
 - Applying all suggestions only applies high-confidence, mappable fields. Low-confidence and ambiguous values require individual review.
+- Codal resources may load differently with VPN on/off or other network routing changes. The extension should fail gracefully, keep diagnostics visible, and leave the manual calculator usable.
 - Source metadata is an audit aid, not proof that a parsed value is correct.
 - The TSETMC widget reuses a stable root element to avoid duplicate NAV widgets and duplicate disclaimers during rerenders. Some unusual client-side navigation behavior on TSETMC may still require a manual page reload if the host page replaces major DOM sections unexpectedly.
 

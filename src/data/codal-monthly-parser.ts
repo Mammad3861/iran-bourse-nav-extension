@@ -5,6 +5,7 @@ import {
   type CodalReportDetail,
   type CodalReportSelectionDiagnostics,
   isMonthlyActivityReport,
+  reconstructCodalCellTable,
   stripUnsafeHtml
 } from './codal-client';
 
@@ -22,6 +23,8 @@ export interface ExtractedPortfolioValue {
   label: string;
   value: number;
   rawText: string;
+  period?: string;
+  periodLabel?: string;
   unit?: string;
   unitMultiplier?: number;
   confidence: ParseConfidence;
@@ -210,6 +213,19 @@ interface UnitInfo {
   warning?: string;
 }
 
+interface ColumnContext {
+  index: number;
+  periodLabel?: string;
+  measureLabel?: string;
+  isCurrentPeriod: boolean;
+  isPriorPeriod: boolean;
+}
+
+interface CandidateRejection {
+  tableIndex: number;
+  reason: string;
+}
+
 function normalizeText(value: string): string {
   return normalizePersianArabicDigits(value)
     .replace(/\u200c/g, ' ')
@@ -237,6 +253,58 @@ function parsedTableFromRows(
     rawRows: rawRows.map((row) => row.map((cell) => String(cell))),
     rows: rawRows.map(normalizeRow).filter((row) => row.some(Boolean))
   };
+}
+
+function normalizedHeaderKey(value: string): string {
+  return normalizeText(value).toLowerCase();
+}
+
+function recordsFromTechnicalCellRows(rows: string[][]): Record<string, unknown>[] {
+  const headers = rows[0] ?? [];
+  const normalizedHeaders = headers.map(normalizedHeaderKey);
+  const hasCellModelHeaders =
+    normalizedHeaders.includes('metatableid') &&
+    normalizedHeaders.includes('metatablecode') &&
+    normalizedHeaders.includes('address') &&
+    normalizedHeaders.includes('value') &&
+    (normalizedHeaders.includes('rowsequence') || normalizedHeaders.includes('columnsequence'));
+
+  if (!hasCellModelHeaders) {
+    return [];
+  }
+
+  return rows
+    .slice(1)
+    .map((row) =>
+      Object.fromEntries(
+        headers.map((header, index) => [header, row[index] ?? '']).filter(([header]) => String(header).trim())
+      )
+    );
+}
+
+function reconstructExtractedCellModelTable(table: CodalExtractedTable): ParsedTable | undefined {
+  if (table.source === 'codal-cell-model') {
+    return undefined;
+  }
+
+  const rows = table.rows.length > 0 ? table.rows : [table.headers];
+  const records = recordsFromTechnicalCellRows(rows);
+  if (records.length === 0) {
+    return undefined;
+  }
+
+  const reconstructed = reconstructCodalCellTable(records, table.index);
+  if (!reconstructed) {
+    return undefined;
+  }
+
+  return parsedTableFromRows(
+    table.index,
+    reconstructed.rows.map((row) => row.map((cell) => String(cell))),
+    table.caption ?? reconstructed.caption,
+    reconstructed.source,
+    reconstructed.reconstruction
+  );
 }
 
 function decodeHtmlEntities(value: string): string {
@@ -317,6 +385,11 @@ function tablesFromJson(rawJson: unknown): ParsedTable[] {
 function tablesFromExtractedTables(tables: CodalExtractedTable[] | undefined): ParsedTable[] {
   return (tables ?? [])
     .map((table): ParsedTable => {
+      const reconstructed = reconstructExtractedCellModelTable(table);
+      if (reconstructed) {
+        return reconstructed;
+      }
+
       const rows = table.rows.length > 0 ? table.rows : [table.headers];
       return parsedTableFromRows(
         table.index,
@@ -335,6 +408,12 @@ function tableText(table: ParsedTable): string {
 
 function hasAny(text: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(text));
+}
+
+function isReconstructedSummaryInvestmentTable(table: ParsedTable): boolean {
+  const metaTableCode = table.reconstruction?.metaTableCode;
+  const source = normalizeText(`${table.caption ?? ''} ${table.reconstruction?.alias ?? ''}`);
+  return metaTableCode === '2570' || /SummaryOfCompanyInvestments/i.test(source);
 }
 
 function matchedLabels(text: string): string[] {
@@ -494,6 +573,15 @@ function totalRows(rows: string[][]): Array<{ row: string[]; rowIndex: number; e
     }));
 }
 
+function preferredAggregateRows(rows: string[][]): Array<{ row: string[]; rowIndex: number; exact: boolean }> {
+  const candidates = totalRows(rows);
+  const exactRows = candidates.filter((candidate) => candidate.exact);
+  if (exactRows.length > 0) {
+    return exactRows;
+  }
+  return candidates;
+}
+
 function totalRowCandidatesForDiagnostics(rows: string[][]): ParserTotalRowCandidate[] {
   return totalRows(rows).map((candidate) => ({
     rowIndex: candidate.rowIndex,
@@ -508,6 +596,34 @@ function fallbackNumericRows(rows: string[][], columnIndex: number): Array<{ row
     .map((row, rowIndex) => ({ row, rowIndex, exact: false }))
     .slice(1)
     .filter(({ row }) => parseCandidateNumber(row[columnIndex] ?? '') !== undefined);
+}
+
+function dateFromText(value: string): string | undefined {
+  return normalizeText(value).match(/\d{4}\/\d{1,2}\/\d{1,2}/)?.[0];
+}
+
+function columnContextFor(rows: string[][], columnIndex: number, reportPeriod?: string): ColumnContext {
+  const headerCells = rows.slice(0, 6).map((row) => normalizeText(row[columnIndex] ?? '')).filter(Boolean);
+  const periodLabel = headerCells.find((cell) => dateFromText(cell));
+  const measureLabel = headerCells.find((cell) =>
+    hasAny(cell, [...labelPatterns.listedPortfolioCostValue, ...labelPatterns.listedPortfolioMarketValue])
+  );
+  const periodDate = periodLabel ? dateFromText(periodLabel) : undefined;
+
+  return {
+    index: columnIndex,
+    periodLabel,
+    measureLabel,
+    isCurrentPeriod: Boolean(reportPeriod && periodDate === reportPeriod),
+    isPriorPeriod: Boolean(reportPeriod && periodDate && periodDate !== reportPeriod)
+  };
+}
+
+function rankColumnContext(context: ColumnContext): number {
+  if (context.isPriorPeriod) return -100;
+  if (context.isCurrentPeriod) return 100;
+  if (!context.periodLabel) return 20;
+  return 0;
 }
 
 function confidenceForValue(options: {
@@ -537,8 +653,10 @@ function extractionReason(options: {
   confidence: ParseConfidence;
   usedTotalRow: boolean;
   unitMultiplier: number;
+  periodLabel?: string;
 }): string {
   const rowName = options.usedTotalRow ? 'ردیف جمع/جمع کل' : `ردیف ${options.rowIndex + 1}`;
+  const period = options.periodLabel ? `، دوره: ${options.periodLabel}` : '';
   const unit =
     options.unitMultiplier === 10_000_000
       ? '؛ واحد جدول میلیون تومان تشخیص داده شد'
@@ -547,34 +665,78 @@ function extractionReason(options: {
         : options.unitMultiplier === 1_000
           ? '؛ واحد جدول هزار ریال تشخیص داده شد'
           : '';
-  return `جدول ${options.table.index}، ستون ${options.columnIndex + 1}، ${rowName} (${options.confidence})${unit}`;
+  return `جدول ${options.table.index}، ستون ${options.columnIndex + 1}، ${rowName}${period} (${options.confidence})${unit}`;
 }
 
 function extractValuesFromTable(
   table: ParsedTable,
   kind: PortfolioValueKind,
   tableScope: 'listed' | 'unlisted',
-  tableConfidence: ParseConfidence
+  tableConfidence: ParseConfidence,
+  reportPeriod?: string,
+  rejections: CandidateRejection[] = []
 ): ExtractedPortfolioValue[] {
   const columnIndexes = findColumnIndexes(table.rows, labelPatterns[kind]);
   if (columnIndexes.length === 0) {
     return [];
   }
 
+  const columnContexts = columnIndexes
+    .map((index) => columnContextFor(table.rows, index, reportPeriod))
+    .sort((left, right) => rankColumnContext(right) - rankColumnContext(left));
+  const usableColumnContexts = columnContexts.filter((context) => !context.isPriorPeriod);
+  const selectedColumnContexts = usableColumnContexts.length > 0 ? usableColumnContexts : [];
+  for (const context of columnContexts.filter((item) => item.isPriorPeriod)) {
+    rejections.push({
+      tableIndex: table.index,
+      reason: `کاندید ستون ${context.index + 1} رد شد چون مربوط به دوره قبلی ${context.periodLabel ?? ''} است.`
+    });
+  }
+
   const unitInfo = unitInfoForTable(table);
   const extracted: ExtractedPortfolioValue[] = [];
-  for (const columnIndex of columnIndexes) {
-    const rows = totalRows(table.rows);
+  for (const context of selectedColumnContexts) {
+    const columnIndex = context.index;
+    const rows = preferredAggregateRows(table.rows);
     const candidateRows = rows.length > 0 ? rows : fallbackNumericRows(table.rows, columnIndex);
-    const numericRows = candidateRows
+    const numericRowsBeforeZeroFilter = candidateRows
       .map((candidate) => ({
         ...candidate,
         rawText: candidate.row[columnIndex] ?? '',
         value: parseCandidateNumber(candidate.row[columnIndex] ?? '')
       }))
       .filter((candidate) => candidate.value !== undefined);
+    const hasNonZero = numericRowsBeforeZeroFilter.some((candidate) => candidate.value !== 0);
+    const nonZeroFilteredRows = hasNonZero
+      ? numericRowsBeforeZeroFilter.filter((candidate) => {
+          if (candidate.value === 0) {
+            rejections.push({
+              tableIndex: table.index,
+              reason: `کاندید صفر در ردیف ${candidate.rowIndex + 1} ستون ${columnIndex + 1} رد شد چون مقدار غیرصفر قابل اتکاتری وجود دارد.`
+            });
+            return false;
+          }
+          return true;
+        })
+      : numericRowsBeforeZeroFilter;
+    const numericRows =
+      nonZeroFilteredRows.length > 1 && nonZeroFilteredRows.every((candidate) => candidate.exact)
+        ? nonZeroFilteredRows.filter((candidate, index) => {
+            const keep = index === nonZeroFilteredRows.length - 1;
+            if (!keep) {
+              rejections.push({
+                tableIndex: table.index,
+                reason: `کاندید ردیف ${candidate.rowIndex + 1} رد شد چون ردیف جمع دقیق‌تری در انتهای بخش وجود دارد.`
+              });
+            }
+            return keep;
+          })
+        : nonZeroFilteredRows;
 
-    const ambiguous = columnIndexes.length > 1 || numericRows.length !== 1;
+    const ambiguous =
+      selectedColumnContexts.length > 1 ||
+      numericRows.length !== 1 ||
+      Boolean(reportPeriod && context.periodLabel && !context.isCurrentPeriod);
     for (const numericRow of numericRows) {
       const baseConfidence = confidenceForValue({
         tableConfidence,
@@ -588,6 +750,8 @@ function extractValuesFromTable(
         label: valueLabel(kind),
         value: numericRow.value! * unitInfo.multiplier,
         rawText: numericRow.rawText,
+        period: context.isCurrentPeriod ? reportPeriod : undefined,
+        periodLabel: context.periodLabel,
         unit: unitInfo.unit,
         unitMultiplier: unitInfo.multiplier,
         confidence: tableScope === 'unlisted' && confidence === 'high' ? 'medium' : confidence,
@@ -600,7 +764,8 @@ function extractValuesFromTable(
           columnIndex,
           confidence,
           usedTotalRow: rows.length > 0,
-          unitMultiplier: unitInfo.multiplier
+          unitMultiplier: unitInfo.multiplier,
+          periodLabel: context.periodLabel
         }),
         warning:
           unitInfo.warning ??
@@ -655,12 +820,48 @@ function extractionFailureWarnings(candidates: PortfolioTableCandidate[], tables
       warnings.add(`جدول ${table.index}: ستون بهای تمام شده یا مبلغ تمام شده پیدا نشد.`);
     }
     if (marketColumns.length === 0) {
-      warnings.add(`جدول ${table.index}: ستون ارزش بازار، ارزش روز یا مبلغ بازار پیدا نشد.`);
+      warnings.add(
+        table.reconstruction
+          ? `جدول ${table.index}: ستون ارزش بازار در جدول بازسازی‌شده پیدا نشد.`
+          : `جدول ${table.index}: ستون ارزش بازار، ارزش روز یا مبلغ بازار پیدا نشد.`
+      );
     }
 
     const unitInfo = unitInfoForTable(table);
     if (!unitInfo.clear) {
       warnings.add(`جدول ${table.index}: واحد گزارش مشخص نیست؛ مقدار خام بدون مقیاس‌گذاری قابل بررسی است.`);
+    }
+  }
+
+  return [...warnings];
+}
+
+function partialExtractionWarnings(
+  candidates: PortfolioTableCandidate[],
+  tables: ParsedTable[],
+  values: ExtractedPortfolioValue[]
+): string[] {
+  const warnings = new Set<string>();
+  const extractedKindsByTable = new Map<number, Set<PortfolioValueKind>>();
+  for (const value of values) {
+    const kinds = extractedKindsByTable.get(value.sourceTableIndex) ?? new Set<PortfolioValueKind>();
+    kinds.add(value.kind);
+    extractedKindsByTable.set(value.sourceTableIndex, kinds);
+  }
+
+  for (const candidate of candidates) {
+    const table = tables.find((item) => item.index === candidate.index);
+    const kinds = extractedKindsByTable.get(candidate.index);
+    if (!table || !kinds?.has('listedPortfolioCostValue') || kinds.has('listedPortfolioMarketValue')) {
+      continue;
+    }
+
+    if (findColumnIndexes(table.rows, labelPatterns.listedPortfolioMarketValue).length === 0) {
+      warnings.add(
+        table.reconstruction
+          ? `جدول ${table.index}: ستون ارزش بازار در جدول بازسازی‌شده پیدا نشد.`
+          : `جدول ${table.index}: ستون ارزش بازار، ارزش روز یا مبلغ بازار پیدا نشد.`
+      );
     }
   }
 
@@ -687,7 +888,11 @@ function tableFailureReasons(table: ParsedTable): string[] {
     reasons.add('ستون بهای تمام شده یا مبلغ تمام شده پیدا نشد.');
   }
   if (marketColumns.length === 0) {
-    reasons.add('ستون ارزش بازار، ارزش روز یا مبلغ بازار پیدا نشد.');
+    reasons.add(
+      table.reconstruction
+        ? 'ستون ارزش بازار در جدول بازسازی‌شده پیدا نشد.'
+        : 'ستون ارزش بازار، ارزش روز یا مبلغ بازار پیدا نشد.'
+    );
   }
   if (!unitInfo.clear) {
     reasons.add('واحد گزارش مشخص نیست؛ مقدار خام فقط برای بررسی دستی مناسب است.');
@@ -779,6 +984,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   const warnings: string[] = [];
   const parsedAt = new Date().toISOString();
   const title = detail.title ?? '';
+  const reportPeriod = extractReportPeriod(detail);
 
   if (title && !isMonthlyActivityReport(title)) {
     const status: MonthlyActivityParseResult['status'] = 'unsupported-report';
@@ -786,7 +992,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     return {
       status,
       reportTitle: detail.title,
-      reportPeriod: extractReportPeriod(detail),
+      reportPeriod,
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
@@ -810,7 +1016,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     return {
       status,
       reportTitle: detail.title,
-      reportPeriod: extractReportPeriod(detail),
+      reportPeriod,
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
@@ -828,7 +1034,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     return {
       status,
       reportTitle: detail.title,
-      reportPeriod: extractReportPeriod(detail),
+      reportPeriod,
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
@@ -840,6 +1046,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   }
 
   const extractedValues: ExtractedPortfolioValue[] = [];
+  const rejectedCandidateWarnings: CandidateRejection[] = [];
   for (const candidate of candidates) {
     const table = tables.find((item) => item.index === candidate.index);
     if (!table) {
@@ -847,21 +1054,44 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     }
 
     const text = tableText(table);
-    const isListed = hasAny(text, listedSignals);
+    const isListed = hasAny(text, listedSignals) || isReconstructedSummaryInvestmentTable(table);
     const isUnlisted = hasAny(text, unlistedSignals);
     if (isListed) {
       extractedValues.push(
-        ...extractValuesFromTable(table, 'listedPortfolioCostValue', 'listed', candidate.confidence),
-        ...extractValuesFromTable(table, 'listedPortfolioMarketValue', 'listed', candidate.confidence)
+        ...extractValuesFromTable(
+          table,
+          'listedPortfolioCostValue',
+          'listed',
+          candidate.confidence,
+          reportPeriod,
+          rejectedCandidateWarnings
+        ),
+        ...extractValuesFromTable(
+          table,
+          'listedPortfolioMarketValue',
+          'listed',
+          candidate.confidence,
+          reportPeriod,
+          rejectedCandidateWarnings
+        )
       );
     }
     if (isUnlisted) {
-      const costValues = extractValuesFromTable(table, 'unlistedPortfolioCostValue', 'unlisted', candidate.confidence);
+      const costValues = extractValuesFromTable(
+        table,
+        'unlistedPortfolioCostValue',
+        'unlisted',
+        candidate.confidence,
+        reportPeriod,
+        rejectedCandidateWarnings
+      );
       const estimatedValues = extractValuesFromTable(
         table,
         'unlistedPortfolioEstimatedValue',
         'unlisted',
-        candidate.confidence
+        candidate.confidence,
+        reportPeriod,
+        rejectedCandidateWarnings
       );
       extractedValues.push(...costValues, ...estimatedValues);
       const cost = costValues.length === 1 ? costValues[0] : undefined;
@@ -886,6 +1116,8 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   const duplicateKinds = safeExtractedValues
     .map((value) => value.kind)
     .filter((kind, index, all) => all.indexOf(kind) !== index);
+  warnings.push(...rejectedCandidateWarnings.map((rejection) => rejection.reason));
+  warnings.push(...partialExtractionWarnings(candidates, tables, safeExtractedValues));
   if (duplicateKinds.length > 0) {
     warnings.push('چند کاندید برای یک نوع داده پیدا شد؛ نتیجه نیاز به بررسی دستی دارد.');
   }
@@ -901,7 +1133,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   return {
     status,
     reportTitle: detail.title,
-    reportPeriod: extractReportPeriod(detail),
+    reportPeriod,
     sourceReportUrl: detail.sourceUrl,
     tableCandidates: candidates,
     extractedValues: safeExtractedValues,

@@ -68,6 +68,9 @@ Current MVP behavior:
 * Codal and TSETMC integrations should be treated as unstable until verified against live pages.
 * Codal detail parsing is best-effort and only produces reviewable suggestions; it never changes calculator inputs without an explicit user action.
 * Low-confidence or duplicate Codal candidates are shown for review only and are not included in bulk apply actions.
+* Partial Codal suggestions do not make NAV complete. If only cost or only market value is applied, the widget marks the calculation incomplete or needing manual review.
+* Blank inputs are treated as missing, not as real zero. A typed `0` is still accepted as an explicit zero.
+* Legacy saved records that contain plain zero values without field-source metadata are treated as missing until the user edits or saves those fields.
 * Output is an estimate only and must be verified manually before any financial decision.
 
 ## Data Sources
@@ -97,6 +100,9 @@ Limited public smoke testing on 2026-06-28 verified that:
 * Codal detail pages may expose portfolio tables as HTML tables, embedded JSON, or script-held row/cell data. The client now reports detected content type, table count, header previews, and parser warnings when a shape is unsupported.
 * Monthly parser diagnostics show table previews, detected labels, candidate values, units, table indexes, and confidence reasons to help users review unsupported or ambiguous Codal reports.
 * Parser extraction now preserves empty table cells for safer column alignment and supports explicit `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان` unit hints. Unclear units are shown as raw values with warnings rather than silently scaled.
+* The widget now shows a calculation status badge and warnings when NAV is incomplete, including cost-only Codal suggestions that would otherwise produce a misleading negative NAV.
+* Incomplete NAV is not shown as a final numeric estimate; NAV total, NAV/share, and P/NAV remain unavailable until required fields are provided.
+* Codal resources can load differently depending on network routing or VPN state; failures should remain visible in diagnostics and leave the manual calculator usable.
 * Chrome automation could not open `chrome://extensions/`, so final unpacked-extension loading from `dist/` must be checked manually in Chrome.
 
 ## Development
@@ -146,6 +152,8 @@ That diagnostics section shows candidate reports, scores, selected/rejected stat
 When Codal report detail is fetched but values are not extracted, open the NAV widget or popup and expand `نمایش جزئیات تشخیص Parser`.
 
 The diagnostics section shows each detected table, detected unit, labels, raw and normalized headers, raw and normalized sample rows, total-row candidates, cost-column candidates, market-value-column candidates, rejected candidates, and extraction failure reasons. When Codal exposes a report as a technical cell model, the extension reconstructs a matrix from row/column coordinates before parsing and marks it as `جدول بازسازی‌شده از داده سلولی کدال` with cell count, dimensions, metaTable code/id, and reconstruction warnings.
+
+For reconstructed investment summary tables, candidate ranking prefers current-period columns, exact aggregate rows, and non-zero values. Prior-year columns and zero aggregate candidates are kept out of the main suggestion and recorded in rejected-candidate diagnostics.
 
 Use `کپی تشخیص Parser` to copy a readable JSON payload with the full parser diagnostics, Codal report-selection diagnostics, parser warnings, reconstruction metadata, and table previews. Use `کپی پیش‌نمایش جدول‌ها` to copy a compact Markdown/text preview with report title, symbol, table count, headers, sample rows, reconstruction status, and failure reasons. If the browser blocks clipboard access, the extension shows a textarea fallback for manual copy.
 

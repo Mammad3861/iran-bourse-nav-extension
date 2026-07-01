@@ -690,9 +690,11 @@ function rowIndexFromAddress(address: string): number | undefined {
 
 function isCodalCellModelRecord(record: Record<string, unknown>): boolean {
   return (
-    'value' in record &&
-    ('address' in record || 'rowSequence' in record || 'columnSequence' in record) &&
-    ('cellGroupName' in record || 'metaTableCode' in record || 'metaTableId' in record)
+    firstDefined(record, ['value', 'Value', 'text', 'Text', 'cellValue', 'CellValue']) !== undefined &&
+    firstDefined(record, ['address', 'Address', 'rowSequence', 'RowSequence', 'columnSequence', 'ColumnSequence']) !==
+      undefined &&
+    firstDefined(record, ['cellGroupName', 'CellGroupName', 'metaTableCode', 'MetaTableCode', 'metaTableId', 'MetaTableId']) !==
+      undefined
   );
 }
 

@@ -141,6 +141,26 @@
   font-size: 14px;
 }
 
+.ibnav-status-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.ibnav-status-badge[data-state='complete'] {
+  background: #dff7ed;
+  color: #047857;
+}
+
+.ibnav-status-badge[data-state='incomplete'] {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ibnav-status-badge[data-state='needs-review'] {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .ibnav-muted {
   color: #66736f;
   font-size: 11px;
