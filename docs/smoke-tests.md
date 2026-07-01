@@ -26,7 +26,7 @@ npm run validate:content-scripts
 - If a valid issuer-level financial statement is available, equity may appear only as a reviewable suggestion.
 - If TSETMC exposes total shares, it may appear only as a reviewable suggestion.
 - `listedPortfolioMarketValue` from Excel should be marked ambiguous when multiple candidates compete.
-- Ambiguous market values must stay diagnostics-only and must not be auto-applied.
+- Ambiguous market values must not be auto-applied. If filtered manual-review candidates appear, applying one must require explicit warning/confirmation.
 - NAV should remain incomplete until required manual fields are provided.
 - The UI must not show a misleading negative NAV when NAV is incomplete.
 - If live Codal discovery fails, monthly/financial slots should say the check failed because of connection/access, not `یافت نشد`. If stale cache is shown, it must be clearly marked stale.
@@ -44,7 +44,7 @@ npm run validate:content-scripts
 - If only subsidiary or invalid financial statements are available, no equity suggestion should be created from those reports.
 - If TSETMC exposes total shares, it may appear only as a reviewable suggestion.
 - `listedPortfolioMarketValue` from Excel should be marked ambiguous when multiple candidates compete.
-- Ambiguous market values must stay diagnostics-only and must not be auto-applied.
+- Ambiguous market values must not be auto-applied. If filtered manual-review candidates appear, applying one must require explicit warning/confirmation.
 - NAV should remain incomplete until required manual fields are provided.
 - If live Codal discovery fails, any previous Codal data must be shown only as stale cached data and must not overwrite manual/applied inputs.
 
@@ -53,6 +53,7 @@ npm run validate:content-scripts
 - Manual inputs remain the source of truth.
 - Codal suggestions are never auto-applied.
 - Equity and total-share suggestions require explicit user apply actions and do not make NAV complete by themselves.
+- Ambiguous listed market-value candidates require explicit manual review/confirmation and do not become reliable or bulk-applied suggestions.
 - Low-confidence, ambiguous, rejected, subsidiary, or clarification reports stay out of main apply-ready UI.
 - Codal and Excel network requests stay in the MV3 background/service worker.
 - Content scripts must not directly fetch `codal.ir`, `search.codal.ir`, or `excel.codal.ir`.

@@ -17,6 +17,7 @@ import {
 } from '../data/codal-monthly-parser';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
 import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
+import { manualReviewMarketValueCandidates } from '../data/market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from '../data/manual-overrides';
 import { manualFieldMetadata, normalizeManualOverrideRecord } from '../data/manual-overrides';
 import {
@@ -482,7 +483,9 @@ function diagnosticsGroupLabel(sourceGroup: string | undefined): string {
 }
 
 function hasCodalAppliedFields(record: ManualOverrideRecord | undefined): boolean {
-  return Object.values(record?.fieldSources ?? {}).some((source) => source?.source === 'codal-suggestion');
+  return Object.values(record?.fieldSources ?? {}).some(
+    (source) => source?.source === 'codal-suggestion' || source?.source === 'codal-excel-manual-review'
+  );
 }
 
 function showManualCopyFallback(container: HTMLElement, text: string): void {
@@ -678,6 +681,107 @@ function appendMonthlyDiagnostics(
   list.appendChild(preview);
 }
 
+function reviewCandidateDetails(value: ExtractedPortfolioValue, result: MonthlyActivityParseResult): string {
+  const table = result.diagnostics.tables.find((item) => item.tableIndex === value.sourceTableIndex);
+  return [
+    `مقدار قابل اعمال: ${formatNumberFa(value.value)}`,
+    `خام: ${value.rawText}`,
+    value.rawValue !== undefined ? `rawValue: ${formatNumberFa(value.rawValue)}` : undefined,
+    value.unit ? `واحد: ${value.unit}` : undefined,
+    value.unitMultiplier !== undefined ? `ضریب واحد: ${formatNumberFa(value.unitMultiplier)}` : undefined,
+    value.unitMultiplier && value.unitMultiplier !== 1 ? `مقدار مقیاس‌گذاری‌شده: ${formatNumberFa(value.value)}` : undefined,
+    `گزارش: ${result.reportTitle ?? '-'}`,
+    `جدول: ${value.sourceTableIndex}${table?.sourceGroup ? ` (${table.sourceGroup})` : ''}`,
+    `ردیف: ${value.rowLabel ?? '-'}`,
+    `ستون: ${value.columnLabel ?? '-'}`,
+    `اطمینان: ${value.confidence}`,
+    value.rankingScore !== undefined ? `امتیاز: ${formatNumberFa(value.rankingScore)}` : undefined,
+    value.warning ? `هشدار: ${value.warning}` : undefined
+  ]
+    .filter(Boolean)
+    .join(' | ');
+}
+
+function appendManualReviewMarketCandidates(
+  list: HTMLElement,
+  result: MonthlyActivityParseResult,
+  root: HTMLElement,
+  options: NavWidgetOptions,
+  getRecord: () => ManualOverrideRecord | undefined,
+  setRecord: (record: ManualOverrideRecord) => void
+): void {
+  const candidates = manualReviewMarketValueCandidates(result);
+  if (candidates.length === 0) return;
+
+  const stale = result.warnings.some((warning) => warning.includes('داده ذخیره‌شده قدیمی'));
+  const details = document.createElement('details');
+  details.className = 'ibnav-table-preview';
+  const summary = document.createElement('summary');
+  summary.textContent = 'بررسی دستی کاندیدهای ارزش روز پرتفوی بورسی';
+  details.appendChild(summary);
+
+  const intro = document.createElement('p');
+  intro.className = 'ibnav-warning';
+  intro.textContent = 'این گزینه‌ها مبهم هستند و فقط پس از تطبیق دستی با گزارش کدال باید اعمال شوند.';
+  details.appendChild(intro);
+
+  for (const value of candidates) {
+    const item = document.createElement('div');
+    item.className = 'ibnav-suggestion';
+    const text = document.createElement('span');
+    text.textContent = reviewCandidateDetails(value, result);
+    item.appendChild(text);
+
+    if (stale) {
+      const staleWarning = document.createElement('small');
+      staleWarning.className = 'ibnav-warning';
+      staleWarning.textContent = 'این مقدار از داده ذخیره‌شده قدیمی اعمال خواهد شد.';
+      item.appendChild(staleWarning);
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ibnav-apply';
+    button.textContent = 'اعمال با هشدار شدید';
+    button.addEventListener('click', async () => {
+      const confirmed = window.confirm(
+        'این مقدار از بین چند کاندید مبهم انتخاب می‌شود و ممکن است اشتباه باشد. فقط اگر با گزارش کدال تطبیق داده‌اید اعمال کنید.'
+      );
+      if (!confirmed) return;
+
+      const input = root.querySelector<HTMLInputElement>('[data-ibnav-field="listedPortfolioMarketValue"]');
+      if (!input) return;
+      input.value = String(value.value);
+      const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
+      const next = applySuggestionToRecord(current, value, {
+        symbol: options.symbol,
+        currentPriceSource: options.currentPriceSource,
+        reportTitle: result.reportTitle,
+        reportDate: result.reportPeriod,
+        sourceKind: 'codal-excel-manual-review',
+        stale
+      });
+
+      try {
+        await persistAppliedRecord(root, next);
+        setRecord(next);
+        updateResetCodalButton(root, next);
+        setApplyStatus(root, 'ارزش روز پرتفوی بورسی با بررسی دستی از کدال اعمال و ذخیره شد.');
+      } catch (error) {
+        setApplyStatus(
+          root,
+          `ذخیره مقدار بررسی دستی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+          true
+        );
+      }
+    });
+    item.appendChild(button);
+    details.appendChild(item);
+  }
+
+  list.appendChild(details);
+}
+
 function recordFromCurrentInputs(
   root: HTMLElement,
   symbol: string,
@@ -742,12 +846,30 @@ function setApplyStatus(root: HTMLElement, message: string, isError = false): vo
 async function persistAppliedRecord(root: HTMLElement, record: ManualOverrideRecord): Promise<void> {
   await saveManualOverride(record);
   updateResults(root, formatPersianTimestamp(new Date(record.updatedAt)));
+  updateFieldSourceBadges(root, record);
 }
 
 function updateResetCodalButton(root: HTMLElement, record: ManualOverrideRecord | undefined): void {
   const button = root.querySelector<HTMLButtonElement>('[data-ibnav-reset-codal]');
   if (button) {
     button.hidden = !hasCodalAppliedFields(record);
+  }
+}
+
+function updateFieldSourceBadges(root: HTMLElement, record: ManualOverrideRecord | undefined): void {
+  const container = root.querySelector<HTMLElement>('[data-ibnav-field-sources]');
+  if (!container) return;
+  container.textContent = '';
+  const fieldSources = record?.fieldSources ?? {};
+  for (const [field, source] of Object.entries(fieldSources) as Array<[keyof NavInputs, ManualValueSourceMetadata]>) {
+    if (source.source !== 'codal-suggestion' && source.source !== 'codal-excel-manual-review') continue;
+    const item = document.createElement('p');
+    item.className = 'ibnav-muted';
+    item.textContent =
+      source.source === 'codal-excel-manual-review'
+        ? `${fieldLabels[field]}: اعمال‌شده از کدال / بررسی دستی${source.stale ? ' - این مقدار از داده ذخیره‌شده قدیمی اعمال شده است.' : ''}`
+        : `${fieldLabels[field]}: اعمال‌شده از پیشنهاد کدال`;
+    container.appendChild(item);
   }
 }
 
@@ -786,6 +908,7 @@ function renderMonthlySuggestions(
 
   list.textContent = '';
   appendMonthlyDiagnostics(list, result, (message, isError) => setApplyStatus(root, message, isError));
+  appendManualReviewMarketCandidates(list, result, root, options, getRecord, setRecord);
   applyAll.hidden = !result.extractedValues.some(
     (value) => value.confidence === 'high' && suggestionTarget(value.kind)
   );
@@ -943,6 +1066,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           )
           .join('')}
       </form>
+      <div data-ibnav-field-sources></div>
       <div class="ibnav-results" aria-live="polite">
         <div class="ibnav-row"><span>وضعیت محاسبه</span><strong class="ibnav-status-badge" data-ibnav-result="status">-</strong></div>
         <div class="ibnav-row"><span>NAV کل</span><strong data-ibnav-result="navTotal">-</strong></div>
@@ -984,6 +1108,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   const updatedAt = activeRecord ? formatPersianTimestamp(new Date(activeRecord.updatedAt)) : formatPersianTimestamp();
   updateResults(root, updatedAt);
   updateResetCodalButton(root, activeRecord);
+  updateFieldSourceBadges(root, activeRecord);
   const codalSymbolValidation = validateCodalSearchSymbol(options.codalSymbol ?? options.symbol);
   const loadCodalDiscovery = async (): Promise<void> => {
     if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
@@ -1079,9 +1204,14 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       input.dataset.ibnavTouched = 'true';
       const field = input.dataset.ibnavField as keyof NavInputs | undefined;
       const parsed = parseLocalizedNumber(input.value);
-      if (field && activeRecord?.fieldSources?.[field]?.source === 'codal-suggestion') {
+      if (
+        field &&
+        (activeRecord?.fieldSources?.[field]?.source === 'codal-suggestion' ||
+          activeRecord?.fieldSources?.[field]?.source === 'codal-excel-manual-review')
+      ) {
         activeRecord = markFieldAsManual(activeRecord, field, parsed);
         updateResetCodalButton(root, activeRecord);
+        updateFieldSourceBadges(root, activeRecord);
         setApplyStatus(root, 'ویرایش دستی ثبت شد؛ منبع این مقدار اکنون دستی است.');
       }
       updateResults(root, formatPersianTimestamp());
@@ -1101,6 +1231,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       activeRecord = record;
       updateResults(root, formatPersianTimestamp(new Date(record.updatedAt)));
       updateResetCodalButton(root, activeRecord);
+      updateFieldSourceBadges(root, activeRecord);
       setApplyStatus(root, 'ورودی‌های دستی ذخیره شد.');
     } catch (error) {
       setApplyStatus(
@@ -1126,6 +1257,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       activeRecord = next;
       updateResults(root, formatPersianTimestamp(new Date(next.updatedAt)));
       updateResetCodalButton(root, activeRecord);
+      updateFieldSourceBadges(root, activeRecord);
       setApplyStatus(root, 'مقادیر پیشنهادی اعمال‌شده از کدال پاک شد؛ مقادیر دستی حفظ شد.');
     } catch (error) {
       setApplyStatus(

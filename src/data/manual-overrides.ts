@@ -1,7 +1,12 @@
 import type { NavInputs } from '../core/nav-calculator';
 import type { ParseConfidence } from './codal-monthly-parser';
 
-export type ManualValueSourceKind = 'manual' | 'codal-suggestion' | 'system' | 'default';
+export type ManualValueSourceKind =
+  | 'manual'
+  | 'codal-suggestion'
+  | 'codal-excel-manual-review'
+  | 'system'
+  | 'default';
 
 export interface ManualValueSourceMetadata {
   value: number;
@@ -12,6 +17,12 @@ export interface ManualValueSourceMetadata {
   reportDate?: string;
   confidence?: ParseConfidence;
   unit?: string;
+  tableIndex?: number;
+  rowLabel?: string;
+  columnLabel?: string;
+  rawValue?: number;
+  scaledValue?: number;
+  stale?: boolean;
 }
 
 export interface ManualOverrideRecord {

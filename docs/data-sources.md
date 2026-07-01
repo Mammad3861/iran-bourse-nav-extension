@@ -78,6 +78,8 @@ Excel-derived tables are searched for listed portfolio market/day value labels s
 
 Excel-derived candidates are ranked conservatively before they reach the main suggestion UI. The parser keeps at most one primary suggestion per NAV field, prefers current-period reconstructed report tables for listed cost, and only promotes a listed market value when one candidate is clearly stronger than competing Excel values. Duplicate, zero, negative, tiny, prior-period, or low-ranked Excel candidates remain available in parser diagnostics and the expanded Excel-candidate preview, but they are not included in bulk apply actions.
 
+If listed portfolio market value remains ambiguous, the widget can expose a collapsed manual-review section containing only filtered candidates with positive values, strong total-row labels, clear market-value columns, and Excel/reconstructed-table sources. Selecting one of these candidates requires explicit confirmation and stores source metadata such as raw value, scaled value, unit, table index, row label, column label, confidence, and stale-cache flag when relevant. The extension does not choose a final market value automatically.
+
 If Chrome or the Codal host blocks the Excel resource even from the extension background context, diagnostics use `cors-blocked` and show: `ExcelUrl به‌دلیل محدودیت CORS/دسترسی افزونه قابل بررسی نبود.`
 
 ## Limited Monthly Activity Parser

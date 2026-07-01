@@ -10,6 +10,8 @@ export interface SuggestionApplyContext {
   reportTitle?: string;
   reportDate?: string;
   appliedAt?: string;
+  sourceKind?: ManualValueSourceMetadata['source'];
+  stale?: boolean;
 }
 
 export function suggestionTarget(kind: PortfolioValueKind): keyof NavInputs | undefined {
@@ -25,7 +27,7 @@ export function sourceMetadataForSuggestion(
   suggestion: ExtractedPortfolioValue,
   context: SuggestionApplyContext
 ): ManualValueSourceMetadata {
-  return {
+  const metadata: ManualValueSourceMetadata = {
     value: suggestion.value,
     source: 'codal-suggestion',
     appliedAt: context.appliedAt ?? new Date().toISOString(),
@@ -34,6 +36,15 @@ export function sourceMetadataForSuggestion(
     confidence: suggestion.confidence,
     unit: suggestion.unit
   };
+  if (context.sourceKind === 'codal-excel-manual-review') {
+    metadata.tableIndex = suggestion.sourceTableIndex;
+    metadata.rowLabel = suggestion.rowLabel;
+    metadata.columnLabel = suggestion.columnLabel;
+    metadata.rawValue = suggestion.rawValue;
+    metadata.scaledValue = suggestion.scaledValue ?? suggestion.value;
+    metadata.stale = context.stale;
+  }
+  return metadata;
 }
 
 function baseRecord(
@@ -64,7 +75,10 @@ export function applySuggestionToRecord(
   record.inputs = { ...record.inputs, [target]: suggestion.value };
   record.fieldSources = {
     ...(record.fieldSources ?? {}),
-    [target]: sourceMetadataForSuggestion(suggestion, context)
+    [target]: {
+      ...sourceMetadataForSuggestion(suggestion, context),
+      source: context.sourceKind ?? 'codal-suggestion'
+    }
   };
   record.updatedAt = context.appliedAt ?? new Date().toISOString();
   return record;
@@ -109,7 +123,10 @@ export function resetCodalSuggestionFields(current: ManualOverrideRecord, resetA
   const fieldSources = { ...(current.fieldSources ?? {}) };
 
   for (const field of Object.keys(fieldSources) as Array<keyof NavInputs>) {
-    if (fieldSources[field]?.source !== 'codal-suggestion') {
+    if (
+      fieldSources[field]?.source !== 'codal-suggestion' &&
+      fieldSources[field]?.source !== 'codal-excel-manual-review'
+    ) {
       continue;
     }
     if (field === 'currentPrice') {
