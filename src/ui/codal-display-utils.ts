@@ -1,4 +1,9 @@
-import type { CodalSourceStrategyDiagnostics } from '../data/codal-client';
+import type {
+  CodalReportDiscoveryResult,
+  CodalReportReference,
+  CodalReportSelectionDiagnostics,
+  CodalSourceStrategyDiagnostics
+} from '../data/codal-client';
 
 export function marketValueStatusText(status: CodalSourceStrategyDiagnostics['marketValueStatus']): string {
   if (status === 'found') return 'پیدا شد';
@@ -32,4 +37,45 @@ function isDetailedRejectedCandidateWarning(warning: string): boolean {
 export function compactParserWarnings(warnings: string[]): string[] {
   const compact = warnings.filter((warning) => !isDetailedRejectedCandidateWarning(warning));
   return [...new Set(compact)];
+}
+
+function isCleanSelectedReport(selection: CodalReportSelectionDiagnostics | undefined): boolean {
+  return (
+    Boolean(selection?.selectedReport) &&
+    (selection?.selectedConfidence === 'high' || selection?.selectedConfidence === 'medium') &&
+    (selection?.selectedWarnings.length ?? 0) === 0
+  );
+}
+
+function hasSelectedWarnings(selection: CodalReportSelectionDiagnostics | undefined): boolean {
+  return Boolean(selection?.selectedReport && selection.selectedWarnings.length > 0);
+}
+
+export function discoverySelectionNotice(result: CodalReportDiscoveryResult): string | undefined {
+  const monthly = result.diagnostics?.monthlyActivity;
+  const financial = result.diagnostics?.financialStatement;
+  const selections = [monthly, financial];
+
+  if (selections.some(isCleanSelectedReport)) {
+    return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
+  }
+  if (selections.some(hasSelectedWarnings)) {
+    return 'گزارش انتخاب‌شده ممکن است مربوط به ناشر دیگری باشد؛ تشخیص گزارش را بررسی کنید.';
+  }
+  if (result.diagnostics) {
+    return 'گزارش به دلیل عدم تطابق نماد/ناشر نادیده گرفته شد.';
+  }
+  return undefined;
+}
+
+export function reportSummary(report: CodalReportReference | undefined): string {
+  if (!report) {
+    return 'یافت نشد';
+  }
+
+  return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
+}
+
+export function financialReportSummary(report: CodalReportReference | undefined): string {
+  return report ? reportSummary(report) : 'صورت مالی معتبر پیدا نشد';
 }

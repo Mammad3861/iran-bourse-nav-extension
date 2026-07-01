@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { CodalSourceStrategyDiagnostics } from '../data/codal-client';
-import { compactParserWarnings, marketValueStatusText, sourceStrategySummaryText } from '../ui/codal-display-utils';
+import type { CodalReportDiscoveryResult, CodalSourceStrategyDiagnostics } from '../data/codal-client';
+import {
+  compactParserWarnings,
+  discoverySelectionNotice,
+  financialReportSummary,
+  marketValueStatusText,
+  sourceStrategySummaryText
+} from '../ui/codal-display-utils';
 
 function strategy(status: CodalSourceStrategyDiagnostics['marketValueStatus']): CodalSourceStrategyDiagnostics {
   return {
@@ -50,5 +56,73 @@ describe('codal display utilities', () => {
       'کاندید ستون 3 رد شد چون مربوط به دوره قبلی 1404/12/29 است.',
       'ارزش روز پرتفوی بورسی در Excel پیدا شد، اما چند مقدار محتمل وجود دارد و نیاز به بررسی دستی دارد.'
     ]);
+  });
+
+  it('does not show issuer warning when a high-confidence selected report has no warnings', () => {
+    const result: CodalReportDiscoveryResult = {
+      status: 'found',
+      symbol: 'وغدير',
+      sourceVerified: false,
+      checkedAt: '2026-07-01T00:00:00.000Z',
+      monthlyActivityReport: {
+        symbol: 'وغدیر',
+        companyName: 'سرمایه گذاری غدیر',
+        title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31'
+      },
+      diagnostics: {
+        requestedSymbol: 'وغدير',
+        requestedIssuerName: 'سرمايه‌گذاري‌غدير(هلدينگ‌',
+        monthlyActivity: {
+          requestedSymbol: 'وغدير',
+          requestedIssuerName: 'سرمايه‌گذاري‌غدير(هلدينگ‌',
+          reportKind: 'monthly-activity',
+          selectedReport: {
+            symbol: 'وغدیر',
+            companyName: 'سرمایه گذاری غدیر',
+            title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31'
+          },
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: []
+        }
+      }
+    };
+
+    expect(discoverySelectionNotice(result)).toBe('گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.');
+  });
+
+  it('shows issuer warning when the selected report itself has warnings', () => {
+    const result: CodalReportDiscoveryResult = {
+      status: 'found',
+      symbol: 'وغدیر',
+      sourceVerified: false,
+      checkedAt: '2026-07-01T00:00:00.000Z',
+      monthlyActivityReport: {
+        symbol: 'وغدیر',
+        title: 'صورت وضعیت پرتفوی دوره 3 ماهه (شرکت دیگر)'
+      },
+      diagnostics: {
+        requestedSymbol: 'وغدیر',
+        monthlyActivity: {
+          requestedSymbol: 'وغدیر',
+          reportKind: 'monthly-activity',
+          selectedReport: {
+            symbol: 'وغدیر',
+            title: 'صورت وضعیت پرتفوی دوره 3 ماهه (شرکت دیگر)'
+          },
+          selectedConfidence: 'medium',
+          selectedWarnings: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'],
+          candidates: []
+        }
+      }
+    };
+
+    expect(discoverySelectionNotice(result)).toBe(
+      'گزارش انتخاب‌شده ممکن است مربوط به ناشر دیگری باشد؛ تشخیص گزارش را بررسی کنید.'
+    );
+  });
+
+  it('labels missing financial statements clearly', () => {
+    expect(financialReportSummary(undefined)).toBe('صورت مالی معتبر پیدا نشد');
   });
 });

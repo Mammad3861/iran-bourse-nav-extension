@@ -180,6 +180,13 @@ const monthlyActivityPatterns = [
 ];
 const financialStatementPatterns = [/صورت\s*های\s*مالی/, /صورت‌های\s*مالی/, /صورت\s*مالی/];
 
+const clarificationPatterns = [
+  /^توضیحات\s*در\s*خصوص/,
+  /توضیحات\s*در\s*خصوص\s*اطلاعات\s*و\s*صورت\s*های\s*مالی/,
+  /شفاف\s*سازی/,
+  /افشای\s*اطلاعات/
+];
+
 function codalCacheKey(symbol: string, kind: CodalReportKind | 'all'): string {
   return `codal-search:${kind}:${symbol}`;
 }
@@ -493,6 +500,27 @@ function reportKindPatterns(kind: CodalReportKind): RegExp[] {
   return [];
 }
 
+function isClarificationReportTitle(title: string): boolean {
+  const normalized = normalizeIssuerText(title);
+  return clarificationPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function isStrongFinancialStatementTitle(title: string): boolean {
+  const normalized = normalizeIssuerText(title);
+  const hasFinancialStatementPhrase =
+    /اطلاعات\s*و\s*صورت\s*های\s*مالی/.test(normalized) ||
+    /صورت\s*های\s*مالی/.test(normalized) ||
+    /صورت\s*مالی/.test(normalized);
+  return hasFinancialStatementPhrase && !isClarificationReportTitle(title);
+}
+
+function reportTitleMatchesKind(title: string, kind: CodalReportKind): boolean {
+  if (kind === 'financial-statement') {
+    return isStrongFinancialStatementTitle(title);
+  }
+  return titleMatches(title, reportKindPatterns(kind));
+}
+
 function scoreReportCandidate(options: {
   report: CodalReportReference;
   requestedSymbol: string;
@@ -534,7 +562,10 @@ function scoreReportCandidate(options: {
     }
   }
 
-  if (titleMatches(report.title, reportKindPatterns(kind))) {
+  if (kind === 'financial-statement' && isClarificationReportTitle(report.title)) {
+    score -= 160;
+    rejectedReasons.push('گزارش توضیحات/شفاف‌سازی است و صورت مالی معتبر محسوب نمی‌شود.');
+  } else if (reportTitleMatchesKind(report.title, kind)) {
     score += kind === 'monthly-activity' ? 35 : 30;
     reasons.push('عنوان گزارش با نوع گزارش مورد انتظار تطبیق دارد.');
   } else {
@@ -1494,7 +1525,7 @@ export function isMonthlyActivityReport(title: string): boolean {
 }
 
 export function isFinancialStatementReport(title: string): boolean {
-  return titleMatches(title, financialStatementPatterns);
+  return isStrongFinancialStatementTitle(title);
 }
 
 export function isPortfolioReport(title: string): boolean {
@@ -1523,7 +1554,9 @@ async function getReportsByKind(
   }
 
   const reports = await searchReportsBySymbol(symbol, options);
-  const matching = sortReportsNewestFirst(reports.filter((report) => titleMatches(report.title, patterns)));
+  const matching = sortReportsNewestFirst(
+    reports.filter((report) => (kind === 'financial-statement' ? isFinancialStatementReport(report.title) : titleMatches(report.title, patterns)))
+  );
   const selected = getLatestMatchingReport(matching, kind, symbol, options.requestedIssuerName);
   await setCachedReports(symbol, kind, selected ? [selected] : []);
   return selected;

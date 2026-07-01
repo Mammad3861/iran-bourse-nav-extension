@@ -20,7 +20,12 @@ import {
   parserDiagnosticsJson,
   parserTablePreviewText
 } from '../ui/parser-diagnostics';
-import { compactParserWarnings, sourceStrategySummaryText } from '../ui/codal-display-utils';
+import {
+  compactParserWarnings,
+  discoverySelectionNotice as sharedDiscoverySelectionNotice,
+  financialReportSummary,
+  sourceStrategySummaryText
+} from '../ui/codal-display-utils';
 import '../ui/styles.css';
 
 function setText(selector: string, value: string): void {
@@ -36,20 +41,6 @@ function reportSummary(report: CodalReportReference | undefined): string {
   }
 
   return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
-}
-
-function discoverySelectionNotice(result: CodalReportDiscoveryResult): string | undefined {
-  const selections = [result.diagnostics?.monthlyActivity, result.diagnostics?.financialStatement].filter(Boolean);
-  if (selections.some((selection) => selection?.selectedWarnings.length)) {
-    return 'گزارش انتخاب‌شده ممکن است مربوط به ناشر دیگری باشد؛ تشخیص گزارش را بررسی کنید.';
-  }
-  if (selections.some((selection) => selection?.selectedConfidence === 'high' || selection?.selectedConfidence === 'medium')) {
-    return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
-  }
-  if (result.diagnostics) {
-    return 'گزارش به دلیل عدم تطابق نماد/ناشر نادیده گرفته شد.';
-  }
-  return undefined;
 }
 
 function updateReportLink(selector: string, report: CodalReportReference | undefined): void {
@@ -136,20 +127,20 @@ function renderCodalDiscovery(result: CodalReportDiscoveryResult): void {
     setText(
       '[data-popup-codal="status"]',
       `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
-        discoverySelectionNotice(result) ? ` - ${discoverySelectionNotice(result)}` : ''
+        sharedDiscoverySelectionNotice(result) ? ` - ${sharedDiscoverySelectionNotice(result)}` : ''
       }`
     );
   } else if (result.status === 'not-found') {
     setText(
       '[data-popup-codal="status"]',
-      result.errorMessage ?? discoverySelectionNotice(result) ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد'
+      result.errorMessage ?? sharedDiscoverySelectionNotice(result) ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد'
     );
   } else {
     setText('[data-popup-codal="status"]', `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`);
   }
 
   setText('[data-popup-codal="monthly"]', reportSummary(result.monthlyActivityReport));
-  setText('[data-popup-codal="financial"]', reportSummary(result.financialStatementReport));
+  setText('[data-popup-codal="financial"]', financialReportSummary(result.financialStatementReport));
   updateReportLink('[data-popup-codal-link="monthly"]', result.monthlyActivityReport);
   updateReportLink('[data-popup-codal-link="financial"]', result.financialStatementReport);
   renderDiscoveryDiagnostics(result);

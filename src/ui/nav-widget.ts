@@ -30,7 +30,12 @@ import {
   parserDiagnosticsJson,
   parserTablePreviewText
 } from './parser-diagnostics';
-import { compactParserWarnings, sourceStrategySummaryText } from './codal-display-utils';
+import {
+  compactParserWarnings,
+  discoverySelectionNotice as sharedDiscoverySelectionNotice,
+  financialReportSummary,
+  sourceStrategySummaryText
+} from './codal-display-utils';
 import styles from './styles.css?inline';
 
 const WIDGET_ROOT_ID = 'ibnav-widget';
@@ -151,20 +156,6 @@ function reportSummary(report: CodalReportReference | undefined): string {
   return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
 }
 
-function discoverySelectionNotice(result: CodalReportDiscoveryResult): string | undefined {
-  const selections = [result.diagnostics?.monthlyActivity, result.diagnostics?.financialStatement].filter(Boolean);
-  if (selections.some((selection) => selection?.selectedWarnings.length)) {
-    return 'گزارش انتخاب‌شده ممکن است مربوط به ناشر دیگری باشد؛ تشخیص گزارش را بررسی کنید.';
-  }
-  if (selections.some((selection) => selection?.selectedConfidence === 'high' || selection?.selectedConfidence === 'medium')) {
-    return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
-  }
-  if (result.diagnostics) {
-    return 'گزارش به دلیل عدم تطابق نماد/ناشر نادیده گرفته شد.';
-  }
-  return undefined;
-}
-
 function renderDiscoveryDiagnostics(root: HTMLElement, result: CodalReportDiscoveryResult): void {
   const container = root.querySelector<HTMLElement>('[data-ibnav-codal="diagnostics"]');
   if (!container) return;
@@ -272,19 +263,19 @@ function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryRes
 
   if (result.status === 'found') {
     status.textContent = `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
-      discoverySelectionNotice(result) ? ` - ${discoverySelectionNotice(result)}` : ''
+      sharedDiscoverySelectionNotice(result) ? ` - ${sharedDiscoverySelectionNotice(result)}` : ''
     }`;
   } else if (result.status === 'not-found') {
     status.textContent =
       result.errorMessage ??
-      discoverySelectionNotice(result) ??
+      sharedDiscoverySelectionNotice(result) ??
       'برای این نماد گزارش قابل اتکایی پیدا نشد';
   } else {
     status.textContent = `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`;
   }
 
   monthly.textContent = reportSummary(result.monthlyActivityReport);
-  financial.textContent = reportSummary(result.financialStatementReport);
+  financial.textContent = financialReportSummary(result.financialStatementReport);
   updateReportLink(root, '[data-ibnav-codal-link="monthly"]', result.monthlyActivityReport);
   updateReportLink(root, '[data-ibnav-codal-link="financial"]', result.financialStatementReport);
   renderDiscoveryDiagnostics(root, result);

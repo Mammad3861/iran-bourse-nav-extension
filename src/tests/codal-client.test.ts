@@ -380,7 +380,34 @@ describe('codal-client', () => {
     expect(result.diagnostics?.monthlyActivity?.selectedWarnings).toHaveLength(0);
   });
 
-  it('marks clarification letters as low-confidence financial statement fallback', async () => {
+  it('matches وغدير request to وغدیر report symbol without issuer warning', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'سرمایه گذاری غدیر',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+            PublishDateTime: '2026-06-25T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وغدير', {
+      requestedIssuerName: 'سرمايه‌گذاري‌غدير(هلدينگ‌',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('found');
+    expect(result.monthlyActivityReport?.symbol).toBe('وغدیر');
+    expect(result.diagnostics?.monthlyActivity?.selectedConfidence).toBe('high');
+    expect(result.diagnostics?.monthlyActivity?.selectedWarnings).toEqual([]);
+  });
+
+  it('does not classify clarification letters as financial statements', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);
     const fetchMock = vi.fn().mockResolvedValue(
@@ -401,10 +428,10 @@ describe('codal-client', () => {
       fetchImpl: fetchMock as unknown as typeof fetch
     });
 
-    expect(result.financialStatementReport?.title).toContain('شفاف سازی');
-    expect(result.financialStatementReport?.selectionDiagnostics?.selectedConfidence).toBe('low');
-    expect(result.diagnostics?.financialStatement?.selectedWarnings).toContain(
-      'عنوان گزارش شبیه اطلاعیه/شفاف‌سازی است و منبع اصلی مالی محسوب نمی‌شود.'
+    expect(result.financialStatementReport).toBeUndefined();
+    expect(result.diagnostics?.financialStatement?.selectedConfidence).toBe('none');
+    expect(result.diagnostics?.financialStatement?.candidates[0].rejectedReasons).toContain(
+      'گزارش توضیحات/شفاف‌سازی است و صورت مالی معتبر محسوب نمی‌شود.'
     );
   });
 
@@ -978,6 +1005,10 @@ describe('codal-client', () => {
     expect(isMonthlyActivityReport('گزارش فعالیت ماهانه دوره ۱ ماهه')).toBe(true);
     expect(isMonthlyActivityReport('گزارش فعالیت هیئت مدیره دوره ۱۲ ماهه')).toBe(false);
     expect(isFinancialStatementReport('صورت‌های مالی سال مالی منتهی')).toBe(true);
+    expect(isFinancialStatementReport('اطلاعات و صورت‌های مالی میاندوره‌ای')).toBe(true);
+    expect(isFinancialStatementReport('توضیحات در خصوص اطلاعات و صورت های مالی منتشر شده')).toBe(false);
+    expect(isFinancialStatementReport('شفاف‌سازی در خصوص صورت‌های مالی')).toBe(false);
+    expect(isFinancialStatementReport('افشای اطلاعات بااهمیت در خصوص صورت‌های مالی')).toBe(false);
     expect(isPortfolioReport('صورت وضعیت پرتفوی شرکت')).toBe(true);
   });
 });
