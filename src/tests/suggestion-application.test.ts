@@ -267,4 +267,34 @@ describe('suggestion application', () => {
     expect(reset.fieldSources?.equity?.source).toBe('manual');
     expect(reset.updatedAt).toBe('2026-06-28T12:00:00.000Z');
   });
+
+  it('applies equity suggestions without completing NAV by itself', () => {
+    const applied = applySuggestionToRecord(undefined, suggestion('equitySuggestion', 1_200_000), {
+      symbol: 'وصندوق',
+      currentPriceSource: 'manual',
+      appliedAt: '2026-06-28T10:00:00.000Z'
+    });
+    const analysis = analyzeNavCompleteness(applied.inputs);
+
+    expect(applied.inputs.equity).toBe(1_200_000);
+    expect(applied.fieldSources?.equity?.source).toBe('codal-suggestion');
+    expect(analysis.navTotalAvailable).toBe(false);
+    expect(analysis.missingFields).toEqual(
+      expect.arrayContaining(['listedPortfolioMarketValue', 'listedPortfolioCostValue', 'unlistedPortfolioSurplus'])
+    );
+  });
+
+  it('applies total share suggestions without completing NAV by itself', () => {
+    const applied = applySuggestionToRecord(undefined, suggestion('totalSharesSuggestion', 9_000_000_000), {
+      symbol: 'وصندوق',
+      currentPriceSource: 'manual',
+      appliedAt: '2026-06-28T10:00:00.000Z'
+    });
+    const analysis = analyzeNavCompleteness(applied.inputs);
+
+    expect(applied.inputs.totalShares).toBe(9_000_000_000);
+    expect(applied.fieldSources?.totalShares?.source).toBe('codal-suggestion');
+    expect(analysis.navTotalAvailable).toBe(false);
+    expect(calculateNav(applied.inputs).navPerShare).toBe(0);
+  });
 });

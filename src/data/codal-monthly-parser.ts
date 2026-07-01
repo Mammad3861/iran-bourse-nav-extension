@@ -5,6 +5,7 @@ import {
   type CodalReportDetail,
   type CodalReportSelectionDiagnostics,
   type CodalSourceStrategyDiagnostics,
+  isFinancialStatementReport,
   isMonthlyActivityReport,
   reconstructCodalCellTable,
   stripUnsafeHtml
@@ -15,7 +16,9 @@ export type PortfolioValueKind =
   | 'listedPortfolioMarketValue'
   | 'unlistedPortfolioCostValue'
   | 'unlistedPortfolioEstimatedValue'
-  | 'unlistedPortfolioSurplusSuggestion';
+  | 'unlistedPortfolioSurplusSuggestion'
+  | 'equitySuggestion'
+  | 'totalSharesSuggestion';
 
 export type ParseConfidence = 'high' | 'medium' | 'low';
 
@@ -180,8 +183,46 @@ const labelPatterns: Record<PortfolioValueKind, RegExp[]> = {
     /مبلغ\s*بازار/,
     /مبلغ\s*ارزش/
   ],
-  unlistedPortfolioSurplusSuggestion: [/مازاد/]
+  unlistedPortfolioSurplusSuggestion: [/مازاد/],
+  equitySuggestion: [
+    /حقوق\s*صاحبان\s*سهام/,
+    /جمع\s*حقوق\s*صاحبان\s*سهام/,
+    /جمع\s*حقوق\s*مالکانه/,
+    /حقوق\s*مالکانه/,
+    /جمع\s*حقوق\s*صاحبان\s*سرمایه/
+  ],
+  totalSharesSuggestion: [
+    /تعداد\s*کل\s*سهام/,
+    /تعداد\s*سهام/,
+    /سهام\s*منتشره/,
+    /سرمایه\s*ثبت\s*شده\s*به\s*تعداد\s*سهام/
+  ]
 };
+
+const financialStatementSignals = [
+  /صورت\s*های\s*مالی/,
+  /صورت‌های\s*مالی/,
+  /صورت\s*مالی/,
+  /اطلاعات\s*و\s*صورت/
+];
+
+const invalidFinancialStatementSignals = [
+  /توضیحات\s*در\s*خصوص/,
+  /شفاف\s*سازی/,
+  /شفاف‌سازی/,
+  /افشای\s*اطلاعات/
+];
+
+const totalSharesRejectSignals = [
+  /حجم\s*معاملات/,
+  /تعداد\s*معاملات/,
+  /ارزش\s*معاملات/,
+  /حجم\s*مبنا/,
+  /سهام\s*شناور/,
+  /تعداد\s*سهامداران/,
+  /تعداد\s*خریدار/,
+  /تعداد\s*فروشنده/
+];
 
 const listedSignals = [
   /پذیرفته\s*شده\s*در\s*بورس/,
@@ -444,7 +485,11 @@ function matchedLabels(text: string): string[] {
     'جمع کل',
     'مجموع',
     'مانده پایان دوره',
-    'سرمایه گذاری ها'
+    'سرمایه گذاری ها',
+    'حقوق صاحبان سهام',
+    'جمع حقوق مالکانه',
+    'تعداد کل سهام',
+    'تعداد سهام'
   ];
   return labels.filter((label) => normalizeText(text).includes(normalizeText(label)));
 }
@@ -654,6 +699,8 @@ function valueLabel(kind: PortfolioValueKind): string {
   if (kind === 'listedPortfolioMarketValue') return 'ارزش بازار پرتفوی بورسی';
   if (kind === 'unlistedPortfolioCostValue') return 'بهای تمام شده پرتفوی غیربورسی';
   if (kind === 'unlistedPortfolioEstimatedValue') return 'ارزش برآوردی پرتفوی غیربورسی';
+  if (kind === 'equitySuggestion') return 'حقوق صاحبان سهام';
+  if (kind === 'totalSharesSuggestion') return 'تعداد کل سهام';
   return 'مازاد پیشنهادی پرتفوی غیربورسی';
 }
 
@@ -884,9 +931,12 @@ function scoreExtractedValue(value: ExtractedPortfolioValue, tables: ParsedTable
   if (value.kind === 'listedPortfolioCostValue' && table?.source !== 'codal-excel') score += 35;
   if (value.kind === 'listedPortfolioMarketValue' && table?.source === 'codal-excel') score += 10;
   if (value.kind.startsWith('unlistedPortfolio')) score += 20;
+  if (value.kind === 'equitySuggestion') score += hasAny(text, labelPatterns.equitySuggestion) ? 35 : 0;
+  if (value.kind === 'totalSharesSuggestion') score += hasAny(text, labelPatterns.totalSharesSuggestion) ? 30 : 0;
   if (table?.reconstruction) score += 20;
   if (hasAny(text, listedSignals)) score += 20;
   if (/پذیرفته\s*شده|بورسی|بازار\s*سرمایه|صورت\s*وضعیت\s*پرتفوی|پورتفوی/.test(text)) score += 15;
+  if (value.kind === 'equitySuggestion' && hasAny(text, financialStatementSignals)) score += 25;
   if (exactTotalLabel(value.rowLabel)) score += 25;
   if (value.period) score += 12;
   if (value.unit === 'نامشخص') score -= 20;
@@ -1164,6 +1214,291 @@ function buildDiagnostics(options: {
   };
 }
 
+function allTablesFromDetail(detail: CodalReportDetail): ParsedTable[] {
+  return [
+    ...tablesFromExtractedTables(detail.extractedTables),
+    ...(detail.extractedTables?.length ? [] : detail.rawHtml ? tablesFromHtml(detail.rawHtml) : []),
+    ...(detail.extractedTables?.length ? [] : detail.rawJson ? tablesFromJson(detail.rawJson) : [])
+  ];
+}
+
+function financialStatementValidity(detail: CodalReportDetail): string | undefined {
+  const title = normalizeText(detail.title ?? '');
+  const selection = detail.selectionDiagnostics;
+  const selectedCandidate = selection?.candidates.find((candidate) => candidate.selected);
+  if (!isFinancialStatementReport(title) || !hasAny(title, financialStatementSignals) || hasAny(title, invalidFinancialStatementSignals)) {
+    return 'حقوق صاحبان سهام از کدال قابل استخراج نبود؛ صورت مالی معتبر برای ناشر پیدا نشد.';
+  }
+  if (
+    selection &&
+    (selection.selectedConfidence === 'low' ||
+      selection.selectedConfidence === 'none' ||
+      (selectedCandidate?.score !== undefined && selectedCandidate.score < 50) ||
+      selection.selectedWarnings.length > 0 ||
+      (selectedCandidate?.rejectedReasons.length ?? 0) > 0)
+  ) {
+    return 'حقوق صاحبان سهام از کدال قابل استخراج نبود؛ صورت مالی معتبر برای ناشر پیدا نشد.';
+  }
+  return undefined;
+}
+
+function isConsolidatedFinancialStatement(detail: CodalReportDetail): boolean {
+  return /تلفیقی/.test(normalizeText(`${detail.title ?? ''} ${detail.plainTextPreview ?? ''}`));
+}
+
+function rowMatchesAny(row: string[], patterns: RegExp[]): boolean {
+  return row.some((cell) => hasAny(normalizeText(cell), patterns));
+}
+
+function bestNumericCellInRow(
+  table: ParsedTable,
+  row: string[],
+  reportPeriod?: string
+): { columnIndex: number; rawText: string; rawValue: number; context: ColumnContext } | undefined {
+  const numericCells = row
+    .map((cell, columnIndex) => ({
+      columnIndex,
+      rawText: cell,
+      rawValue: parseCandidateNumber(cell),
+      context: columnContextFor(table.rows, columnIndex, reportPeriod)
+    }))
+    .filter((candidate): candidate is { columnIndex: number; rawText: string; rawValue: number; context: ColumnContext } => {
+      if (candidate.rawValue === undefined || candidate.context.isPriorPeriod) return false;
+      return Math.abs(candidate.rawValue) > 0;
+    })
+    .sort((left, right) => rankColumnContext(right.context) - rankColumnContext(left.context));
+
+  return numericCells[0];
+}
+
+function extractStandaloneFinancialValue(options: {
+  detail: CodalReportDetail;
+  table: ParsedTable;
+  kind: 'equitySuggestion' | 'totalSharesSuggestion';
+  rowPatterns: RegExp[];
+  reportPeriod?: string;
+  unitInfo: UnitInfo;
+  warning?: string;
+}): ExtractedPortfolioValue[] {
+  const extracted: ExtractedPortfolioValue[] = [];
+  const consolidated = isConsolidatedFinancialStatement(options.detail);
+  const rows = options.table.rows
+    .map((row, rowIndex) => ({ row, rowIndex }))
+    .filter(({ row }) => rowMatchesAny(row, options.rowPatterns));
+
+  for (const { row, rowIndex } of rows) {
+    if (options.kind === 'totalSharesSuggestion' && rowMatchesAny(row, totalSharesRejectSignals)) {
+      continue;
+    }
+
+    const numeric = bestNumericCellInRow(options.table, row, options.reportPeriod);
+    if (!numeric) continue;
+
+    const multiplier = options.kind === 'totalSharesSuggestion' ? 1 : options.unitInfo.multiplier;
+    const confidence: ParseConfidence =
+      options.kind === 'equitySuggestion'
+        ? consolidated || !options.unitInfo.clear
+          ? 'medium'
+          : 'high'
+        : 'medium';
+    const consolidatedWarning =
+      options.kind === 'equitySuggestion' && consolidated
+        ? 'این مقدار از صورت مالی تلفیقی استخراج شده و نیازمند بررسی دستی است.'
+        : undefined;
+    extracted.push({
+      kind: options.kind,
+      label: valueLabel(options.kind),
+      value: numeric.rawValue * multiplier,
+      scaledValue: numeric.rawValue * multiplier,
+      rawText: numeric.rawText,
+      rawValue: numeric.rawValue,
+      period: numeric.context.isCurrentPeriod ? options.reportPeriod : undefined,
+      periodLabel: numeric.context.periodLabel,
+      unit: options.kind === 'totalSharesSuggestion' ? 'سهم' : options.unitInfo.unit,
+      unitMultiplier: multiplier,
+      confidence,
+      sourceTableIndex: options.table.index,
+      sourceRowIndex: rowIndex,
+      sourceColumnIndex: numeric.columnIndex,
+      sourceTableCaption: options.table.caption,
+      rowLabel: rowLabel(row),
+      columnLabel:
+        numeric.context.measureLabel ??
+        options.table.rows
+          .slice(0, 6)
+          .map((headerRow) => headerRow[numeric.columnIndex])
+          .filter(Boolean)
+          .join(' / '),
+      reason: `جدول ${options.table.index}، ردیف ${rowIndex + 1}، ستون ${numeric.columnIndex + 1} (${confidence})`,
+      warning: consolidatedWarning ?? options.warning ?? (!options.unitInfo.clear && options.kind === 'equitySuggestion' ? options.unitInfo.warning : undefined)
+    });
+  }
+
+  return extracted;
+}
+
+export function parseFinancialStatementReport(detail: CodalReportDetail): MonthlyActivityParseResult {
+  const parsedAt = new Date().toISOString();
+  const reportPeriod = extractReportPeriod(detail);
+  const invalidReason = financialStatementValidity(detail);
+  const tables = invalidReason ? [] : allTablesFromDetail(detail);
+  const tablePreviews = tables.map(tablePreview);
+
+  if (invalidReason) {
+    const status: MonthlyActivityParseResult['status'] = 'unsupported-report';
+    return {
+      status,
+      reportTitle: detail.title,
+      reportPeriod,
+      sourceReportUrl: detail.sourceUrl,
+      tableCandidates: [],
+      extractedValues: [],
+      primarySuggestions: [],
+      secondarySuggestions: [],
+      tablePreviews: [],
+      diagnostics: buildDiagnostics({ detail, status, tables: [], warnings: [invalidReason], extractedValues: [] }),
+      warnings: [invalidReason],
+      parsedAt
+    };
+  }
+
+  if (tables.length === 0) {
+    const status: MonthlyActivityParseResult['status'] = 'empty';
+    const warnings = ['حقوق صاحبان سهام از کدال قابل استخراج نبود؛ جدول قابل بررسی در صورت مالی پیدا نشد.'];
+    return {
+      status,
+      reportTitle: detail.title,
+      reportPeriod,
+      sourceReportUrl: detail.sourceUrl,
+      tableCandidates: [],
+      extractedValues: [],
+      primarySuggestions: [],
+      secondarySuggestions: [],
+      tablePreviews,
+      diagnostics: buildDiagnostics({ detail, status, tables, warnings, extractedValues: [] }),
+      warnings,
+      parsedAt
+    };
+  }
+
+  const extractedValues = tables.flatMap((table) => {
+    const unitInfo = unitInfoForTable(table);
+    return [
+      ...extractStandaloneFinancialValue({
+        detail,
+        table,
+        kind: 'equitySuggestion',
+        rowPatterns: labelPatterns.equitySuggestion,
+        reportPeriod,
+        unitInfo
+      }),
+      ...extractStandaloneFinancialValue({
+        detail,
+        table,
+        kind: 'totalSharesSuggestion',
+        rowPatterns: labelPatterns.totalSharesSuggestion,
+        reportPeriod,
+        unitInfo: { unit: 'ریال', multiplier: 1, clear: true }
+      })
+    ];
+  });
+  const split = splitPrimarySuggestions(downgradeDuplicateKinds(extractedValues), tables);
+  const warnings = [...split.warnings];
+  if (!split.primary.some((value) => value.kind === 'equitySuggestion')) {
+    warnings.push('حقوق صاحبان سهام از کدال قابل استخراج نبود؛ برچسب قابل اتکایی در صورت مالی پیدا نشد.');
+  }
+  if (!split.primary.some((value) => value.kind === 'totalSharesSuggestion')) {
+    warnings.push('تعداد کل سهام از کدال قابل استخراج نبود؛ فقط در صورت وجود برچسب صریح پیشنهاد می‌شود.');
+  }
+
+  const status: MonthlyActivityParseResult['status'] = split.primary.length > 0 ? 'parsed' : 'ambiguous';
+  const candidates: PortfolioTableCandidate[] = tables
+    .filter((table) => hasAny(tableText(table), [...labelPatterns.equitySuggestion, ...labelPatterns.totalSharesSuggestion]))
+    .map((table) => ({
+      index: table.index,
+      caption: table.caption,
+      rowCount: table.rows.length,
+      columnCount: table.rows.reduce((max, row) => Math.max(max, row.length), 0),
+      matchedLabels: matchedLabels(tableText(table)),
+      confidence: 'medium'
+    }));
+
+  return {
+    status,
+    reportTitle: detail.title,
+    reportPeriod,
+    sourceReportUrl: detail.sourceUrl,
+    tableCandidates: candidates,
+    extractedValues: split.primary,
+    primarySuggestions: split.primary,
+    secondarySuggestions: split.secondary,
+    tablePreviews,
+    diagnostics: buildDiagnostics({
+      detail,
+      status,
+      tables,
+      warnings,
+      extractedValues,
+      extraRejectedCandidates: split.rejections
+    }),
+    warnings,
+    parsedAt
+  };
+}
+
+export function mergeMonthlyActivityParseResults(results: MonthlyActivityParseResult[]): MonthlyActivityParseResult {
+  const available = results.filter(Boolean);
+  const base = available[0];
+  if (!base) {
+    const parsedAt = new Date().toISOString();
+    return {
+      status: 'empty',
+      tableCandidates: [],
+      extractedValues: [],
+      primarySuggestions: [],
+      secondarySuggestions: [],
+      tablePreviews: [],
+      diagnostics: {
+        detectedTableCount: 0,
+        parserStatus: 'empty',
+        parserWarnings: [],
+        extractedCandidates: [],
+        rejectedCandidates: [],
+        tables: []
+      },
+      warnings: [],
+      parsedAt
+    };
+  }
+
+  const extractedValues = available.flatMap((result) => result.extractedValues);
+  const secondarySuggestions = available.flatMap((result) => result.secondarySuggestions);
+  const warnings = [...new Set(available.flatMap((result) => result.warnings))];
+  const diagnostics: MonthlyActivityParserDiagnostics = {
+    ...base.diagnostics,
+    detectedTableCount: available.reduce((sum, result) => sum + result.diagnostics.detectedTableCount, 0),
+    parserStatus: extractedValues.length > 0 ? (warnings.length ? 'ambiguous' : 'parsed') : 'ambiguous',
+    parserWarnings: warnings,
+    extractedCandidates: available.flatMap((result) => result.diagnostics.extractedCandidates),
+    rejectedCandidates: available.flatMap((result) => result.diagnostics.rejectedCandidates),
+    tables: available.flatMap((result) => result.diagnostics.tables)
+  };
+
+  return {
+    ...base,
+    status: diagnostics.parserStatus,
+    reportTitle: available.map((result) => result.reportTitle).filter(Boolean).join(' + ') || base.reportTitle,
+    tableCandidates: available.flatMap((result) => result.tableCandidates),
+    extractedValues,
+    primarySuggestions: extractedValues,
+    secondarySuggestions,
+    tablePreviews: available.flatMap((result) => result.tablePreviews),
+    diagnostics,
+    warnings,
+    parsedAt: new Date().toISOString()
+  };
+}
+
 export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyActivityParseResult {
   const warnings: string[] = [];
   const parsedAt = new Date().toISOString();
@@ -1189,11 +1524,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     };
   }
 
-  const tables = [
-    ...tablesFromExtractedTables(detail.extractedTables),
-    ...(detail.extractedTables?.length ? [] : detail.rawHtml ? tablesFromHtml(detail.rawHtml) : []),
-    ...(detail.extractedTables?.length ? [] : detail.rawJson ? tablesFromJson(detail.rawJson) : [])
-  ];
+  const tables = allTablesFromDetail(detail);
   const tablePreviews = tables.map(tablePreview);
 
   if (tables.length === 0) {

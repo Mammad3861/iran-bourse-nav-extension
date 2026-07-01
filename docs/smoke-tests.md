@@ -23,6 +23,8 @@ npm run validate:content-scripts
 - Financial report should be valid when an issuer-level financial statement is available.
 - Monthly report detail and ExcelUrl should be fetched when available.
 - Parser should suggest `listedPortfolioCostValue = 136,494,769`.
+- If a valid issuer-level financial statement is available, equity may appear only as a reviewable suggestion.
+- If TSETMC exposes total shares, it may appear only as a reviewable suggestion.
 - `listedPortfolioMarketValue` from Excel should be marked ambiguous when multiple candidates compete.
 - Ambiguous market values must stay diagnostics-only and must not be auto-applied.
 - NAV should remain incomplete until required manual fields are provided.
@@ -38,6 +40,8 @@ npm run validate:content-scripts
 - Subsidiary reports such as `شرکت ایران مارین سرویسز` must remain in diagnostics only and must not appear in the main financial report slot.
 - ExcelUrl should be fetched when available.
 - Parser should suggest `listedPortfolioCostValue = 275,218,935`.
+- If only subsidiary or invalid financial statements are available, no equity suggestion should be created from those reports.
+- If TSETMC exposes total shares, it may appear only as a reviewable suggestion.
 - `listedPortfolioMarketValue` from Excel should be marked ambiguous when multiple candidates compete.
 - Ambiguous market values must stay diagnostics-only and must not be auto-applied.
 - NAV should remain incomplete until required manual fields are provided.
@@ -46,6 +50,7 @@ npm run validate:content-scripts
 
 - Manual inputs remain the source of truth.
 - Codal suggestions are never auto-applied.
+- Equity and total-share suggestions require explicit user apply actions and do not make NAV complete by themselves.
 - Low-confidence, ambiguous, rejected, subsidiary, or clarification reports stay out of main apply-ready UI.
 - Codal and Excel network requests stay in the MV3 background/service worker.
 - Content scripts must not directly fetch `codal.ir`, `search.codal.ir`, or `excel.codal.ir`.

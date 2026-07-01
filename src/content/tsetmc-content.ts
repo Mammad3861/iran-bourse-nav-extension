@@ -16,6 +16,7 @@ async function boot(): Promise<void> {
   let codalSymbol = snapshot.codalSymbol;
   let instrumentName = snapshot.instrumentName;
   let currentPrice = snapshot.currentPrice;
+  let totalShares: number | undefined;
   let currentPriceSource: ManualOverrideRecord['currentPriceSource'] = snapshot.currentPriceSource;
 
   if (snapshot.insCode) {
@@ -28,6 +29,7 @@ async function boot(): Promise<void> {
       displaySymbol = displaySymbol ?? apiSymbol;
       codalSymbol = codalSymbol ?? apiSymbol;
       instrumentName = instrumentName ?? info.name;
+      totalShares = info.totalShares;
     } catch {
       // Keep DOM-only state. The widget will show a safe fallback.
     }
@@ -61,6 +63,7 @@ async function boot(): Promise<void> {
     codalSymbol,
     instrumentName,
     currentPrice,
+    totalShares,
     currentPriceSource: currentPrice ? currentPriceSource : 'unknown'
   });
 }

@@ -16,6 +16,8 @@ export function suggestionTarget(kind: PortfolioValueKind): keyof NavInputs | un
   if (kind === 'listedPortfolioCostValue') return 'listedPortfolioCostValue';
   if (kind === 'listedPortfolioMarketValue') return 'listedPortfolioMarketValue';
   if (kind === 'unlistedPortfolioSurplusSuggestion') return 'unlistedPortfolioSurplus';
+  if (kind === 'equitySuggestion') return 'equity';
+  if (kind === 'totalSharesSuggestion') return 'totalShares';
   return undefined;
 }
 

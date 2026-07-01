@@ -17,6 +17,7 @@ The first version is intentionally **semi-manual**. It injects a small Persian R
 * Defensive TSETMC and Codal data-client boundaries
 * Codal report discovery and defensive report-detail table detection
 * Limited Codal monthly activity parser with table diagnostics and suggested portfolio values
+* Conservative equity and total-share suggestions from valid issuer-level financial statements/TSETMC instrument info
 * Unit-tested NAV and parsing logic
 
 ## Formula
@@ -68,6 +69,8 @@ Current MVP behavior:
 * Codal and TSETMC integrations should be treated as unstable until verified against live pages.
 * Codal detail parsing is best-effort and only produces reviewable suggestions; it never changes calculator inputs without an explicit user action.
 * Low-confidence or duplicate Codal candidates are shown for review only and are not included in bulk apply actions.
+* Equity suggestions are extracted only from financial statements that pass issuer/report-selection checks; suspicious subsidiary, clarification, or low-confidence reports are rejected for this purpose.
+* Total-share suggestions may come from TSETMC instrument info or clearly labeled financial-statement rows, but are never inferred from capital unless the source is explicit.
 * Partial Codal suggestions do not make NAV complete. If only cost or only market value is applied, the widget marks the calculation incomplete or needing manual review.
 * Blank inputs are treated as missing, not as real zero. A typed `0` is still accepted as an explicit zero.
 * Legacy saved records that contain plain zero values without field-source metadata are treated as missing until the user edits or saves those fields.

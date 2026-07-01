@@ -91,6 +91,8 @@ It may suggest these candidate values when labels and tables are clear enough:
 - Unlisted portfolio cost value.
 - Unlisted portfolio estimated value.
 - A low-confidence unlisted surplus suggestion when both unlisted cost and estimated value are present.
+- Equity / `حقوق صاحبان سهام`, but only from a valid issuer-level financial statement that passed report-selection checks.
+- Total shares / `تعداد کل سهام`, but only from explicit share-count labels or TSETMC instrument info.
 - Report period/date when detectable from the title or preview.
 
 For detected tables, the parser also exposes diagnostics for review:
@@ -113,6 +115,10 @@ When a suggestion is applied, the saved manual override records source metadata 
 - applied value
 
 If the user later edits that field manually, the field source is marked back to `manual`.
+
+Equity extraction is deliberately gated. Clarification letters, disclosure reports, subsidiary/other-company financial statements, low-confidence financial selections, negative-score selections, and reports with suspicious issuer warnings are not used for main equity suggestions. Consolidated financial statements may produce only review-needed suggestions with a warning that the value is consolidated.
+
+Total-share suggestions follow a safer source order: TSETMC instrument info first when available, then explicit financial-statement/capital table labels, and only then clearly structured Codal notes in a future phase. The parser does not guess total shares from capital unless par value and share count are explicitly represented, and it rejects trading volume, trade count, trade value, base volume, free float, and shareholder-count labels.
 
 The parser supports Persian and Arabic digit normalization, comma-separated numbers, parenthesized negative values, explicit unit hints, total rows such as `جمع`, `جمع کل`, `مجموع`, `مانده پایان دوره`, and `سرمایه گذاری ها`, and common Persian labels such as `بهای تمام شده`, `مبلغ تمام شده`, `ارزش بازار`, `ارزش روز`, `مبلغ بازار`, `پذیرفته شده در بورس`, `خارج از بورس`, `پرتفوی بورسی`, and `پرتفوی غیر بورسی`.
 

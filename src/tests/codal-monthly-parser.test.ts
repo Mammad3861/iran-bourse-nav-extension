@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CodalReportDetail } from '../data/codal-client';
-import { parseMonthlyActivityReport } from '../data/codal-monthly-parser';
+import { mergeMonthlyActivityParseResults, parseFinancialStatementReport, parseMonthlyActivityReport } from '../data/codal-monthly-parser';
 
 function detail(overrides: Partial<CodalReportDetail>): CodalReportDetail {
   return {
@@ -875,6 +875,168 @@ describe('parseMonthlyActivityReport', () => {
       expect.arrayContaining([
         'ارزش روز پرتفوی بورسی در Excel پیدا شد، اما چند مقدار محتمل وجود دارد و نیاز به بررسی دستی دارد.'
       ])
+    );
+  });
+
+  it('extracts equity and total shares from a valid issuer-level financial statement as suggestions only', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹ (حسابرسی شده)',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره مالی منتهی به ۱۴۰۴/۱۲/۲۹', 'سال مالی منتهی به ۱۴۰۳/۱۲/۳۰'],
+            rows: [
+              ['شرح', 'دوره مالی منتهی به ۱۴۰۴/۱۲/۲۹', 'سال مالی منتهی به ۱۴۰۳/۱۲/۳۰'],
+              ['جمع حقوق صاحبان سهام', '۱۲۳,۴۵۶', '۱۱۱,۱۱۱'],
+              ['تعداد کل سهام', '۹,۰۰۰,۰۰۰,۰۰۰', '۹,۰۰۰,۰۰۰,۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          requestedIssuerName: 'سرمایه گذاری صندوق بازنشستگی',
+          reportKind: 'financial-statement',
+          selectedReport: undefined,
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: {
+                symbol: 'وصندوق',
+                title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹'
+              },
+              score: 90,
+              selected: true,
+              reasons: ['exact symbol match'],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          value: 123_456_000_000,
+          confidence: 'high',
+          unit: 'میلیون ریال'
+        }),
+        expect.objectContaining({
+          kind: 'totalSharesSuggestion',
+          value: 9_000_000_000,
+          confidence: 'medium',
+          unit: 'سهم'
+        })
+      ])
+    );
+  });
+
+  it('rejects invalid financial statements before extracting equity', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت ایران مارین سرویسز)',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['جمع حقوق صاحبان سهام', '۱۲۳,۴۵۶']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وغدیر',
+          requestedIssuerName: 'سرمایه گذاری غدیر',
+          reportKind: 'financial-statement',
+          selectedReport: undefined,
+          selectedConfidence: 'low',
+          selectedWarnings: ['title inside parentheses refers to another issuer'],
+          candidates: [
+            {
+              report: {
+                symbol: 'وغدیر',
+                title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت ایران مارین سرویسز)'
+              },
+              score: -75,
+              selected: true,
+              reasons: [],
+              warnings: ['title inside parentheses refers to another issuer'],
+              rejectedReasons: ['title inside parentheses refers to another issuer']
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.status).toBe('unsupported-report');
+    expect(result.extractedValues).toHaveLength(0);
+    expect(result.warnings.join(' ')).toContain('صورت مالی معتبر برای ناشر پیدا نشد');
+  });
+
+  it('merges monthly portfolio suggestions with financial-statement suggestions', () => {
+    const monthly = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس - مبالغ به میلیون ریال</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش بازار</th></tr>
+            <tr><td>جمع</td><td>۱۰۰</td><td>۱۵۰</td></tr>
+          </table>
+        `
+      })
+    );
+    const financial = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹',
+        extractedTables: [
+          {
+            index: 5,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['جمع حقوق مالکانه', '۲۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedReport: undefined,
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: {
+                symbol: 'وصندوق',
+                title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹'
+              },
+              score: 80,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    const merged = mergeMonthlyActivityParseResults([monthly, financial]);
+
+    expect(merged.extractedValues.map((value) => value.kind)).toEqual(
+      expect.arrayContaining(['listedPortfolioCostValue', 'listedPortfolioMarketValue', 'equitySuggestion'])
     );
   });
 });

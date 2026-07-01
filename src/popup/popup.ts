@@ -8,6 +8,8 @@ import type {
   CodalReportReference
 } from '../data/codal-client';
 import {
+  mergeMonthlyActivityParseResults,
+  parseFinancialStatementReport,
   parseMonthlyActivityReport,
   type ExtractedPortfolioValue,
   type MonthlyActivityParseResult
@@ -462,8 +464,10 @@ async function renderPopup(): Promise<void> {
 
   const codalResult = await requestCodalDiscovery(codalSymbolValidation.symbol);
   renderCodalDiscovery(codalResult);
-  const report = codalResult.monthlyActivityReport ?? codalResult.financialStatementReport;
-  if (!report) {
+  const reports = [codalResult.monthlyActivityReport, codalResult.financialStatementReport].filter(
+    (report): report is CodalReportReference => Boolean(report)
+  );
+  if (reports.length === 0) {
     renderCodalDetail({
       status: codalResult.status === 'failed' ? 'network-error' : 'unavailable',
       errorMessage: codalResult.errorMessage
@@ -471,10 +475,29 @@ async function renderPopup(): Promise<void> {
     return;
   }
 
-  const detailResult = await requestCodalReportDetail(report);
-  renderCodalDetail(detailResult);
-  if (detailResult.detail) {
-    renderMonthlySuggestions(parseMonthlyActivityReport(detailResult.detail));
+  const parseResults: MonthlyActivityParseResult[] = [];
+  const uniqueReports = reports.filter(
+    (report, index, all) =>
+      all.findIndex((candidate) => (candidate.url ?? candidate.tracingNo ?? candidate.title) === (report.url ?? report.tracingNo ?? report.title)) === index
+  );
+  let renderedDetail = false;
+  for (const report of uniqueReports) {
+    const detailResult = await requestCodalReportDetail(report);
+    if (!renderedDetail) {
+      renderCodalDetail(detailResult);
+      renderedDetail = true;
+    }
+    if (detailResult.detail) {
+      parseResults.push(
+        report === codalResult.financialStatementReport
+          ? parseFinancialStatementReport(detailResult.detail)
+          : parseMonthlyActivityReport(detailResult.detail)
+      );
+    }
+  }
+
+  if (parseResults.length > 0) {
+    renderMonthlySuggestions(mergeMonthlyActivityParseResults(parseResults));
   }
 }
 

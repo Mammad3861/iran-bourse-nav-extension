@@ -17,6 +17,9 @@ This extension provides an estimate, not an audited valuation.
 - Codal report selection uses best-effort symbol, issuer-name, title, report-type, and publish-date scoring. This can reject suspicious subsidiary reports, but it cannot prove issuer identity with audit-level certainty.
 - Reports with different Codal symbols, weak issuer metadata, or titles referencing another company in parentheses may be ignored or marked suspicious. Users should review selection diagnostics when expected reports are missing.
 - Generic clarification letters may appear in search results; they are downgraded and should not be treated as audited financial statements without manual review.
+- Equity suggestions require a valid issuer-level financial statement. If no such report is selected, the UI should show `حقوق صاحبان سهام از کدال قابل استخراج نبود؛ صورت مالی معتبر برای ناشر پیدا نشد.` instead of using a suspicious or subsidiary report.
+- Consolidated financial statements can differ from standalone issuer-level values; any consolidated equity suggestion is shown with a manual-review warning.
+- Total-share suggestions are only safe when a source explicitly labels total shares. The extension does not infer share count from capital, trade volume, trade count, free float, base volume, or market activity fields.
 - Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
 - Detected Codal tables may come from HTML, JSON, script-embedded data, or Codal cell-model arrays. Row and column counts or header previews do not imply the report format is fully supported for value extraction.
 - Some Codal search results expose an `ExcelUrl`. The extension can try that selected-report resource through the background service worker, but it only supports accessible table-like HTML, JSON, CSV, or tab-separated text. Binary spreadsheet downloads, CORS/access restrictions, or blocked resources are reported as unsupported/unavailable instead of parsed.
@@ -37,6 +40,7 @@ This extension provides an estimate, not an audited valuation.
 - The parser does not infer missing units, audit restatements, capital increases, or post-report adjustments.
 - Unlisted portfolio surplus suggestions are low confidence because they are derived from reported cost and estimated values and may not match the project’s NAV assumptions.
 - Parsed Codal values never overwrite manual inputs automatically.
+- Applying equity alone or total shares alone does not complete NAV. NAV total still requires equity, listed portfolio market value, listed portfolio cost value, and unlisted portfolio surplus to be present.
 - Blank manual inputs are treated as missing values, not real zero values. Users must type `0` when a field is intentionally zero.
 - Legacy records that only contain default-looking `0` values without manual or Codal source metadata are treated as missing values during loading/migration.
 - Applying a partial Codal suggestion, such as listed portfolio cost without listed portfolio market value, can make the NAV arithmetic negative or incomplete. The UI marks these cases as incomplete or needing manual review instead of treating the result as final.

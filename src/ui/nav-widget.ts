@@ -9,6 +9,8 @@ import type {
   CodalReportReference
 } from '../data/codal-client';
 import {
+  mergeMonthlyActivityParseResults,
+  parseFinancialStatementReport,
   parseMonthlyActivityReport,
   type ExtractedPortfolioValue,
   type MonthlyActivityParseResult
@@ -47,6 +49,7 @@ export interface NavWidgetOptions {
   codalSymbol?: string;
   instrumentName?: string;
   currentPrice?: number;
+  totalShares?: number;
   currentPriceSource: ManualOverrideRecord['currentPriceSource'];
   mount?: HTMLElement;
 }
@@ -340,7 +343,60 @@ function suggestionSafetyWarnings(value: ExtractedPortfolioValue, result: Monthl
   if (value.confidence === 'medium' && value.unit === 'نامشخص') {
     warnings.push('واحد گزارش نامشخص است؛ این مقدار خام است و ممکن است نیاز به مقیاس‌گذاری داشته باشد.');
   }
+  if (value.kind === 'equitySuggestion') {
+    warnings.push('اعمال حقوق صاحبان سهام به‌تنهایی NAV را کامل نمی‌کند؛ سایر ورودی‌های ضروری باید دستی بررسی شوند.');
+  }
+  if (value.kind === 'totalSharesSuggestion') {
+    warnings.push('اعمال تعداد سهام فقط برای NAV هر سهم/P/NAV استفاده می‌شود و NAV کل را کامل نمی‌کند.');
+  }
   return warnings;
+}
+
+function tsetmcTotalSharesParseResult(value: number, options: NavWidgetOptions): MonthlyActivityParseResult {
+  const parsedAt = new Date().toISOString();
+  const suggestion: ExtractedPortfolioValue = {
+    kind: 'totalSharesSuggestion',
+    label: 'تعداد کل سهام',
+    value,
+    rawText: String(value),
+    rawValue: value,
+    unit: 'سهم',
+    unitMultiplier: 1,
+    confidence: 'medium',
+    sourceTableIndex: -1,
+    sourceTableCaption: 'TSETMC instrument info',
+    rowLabel: 'TSETMC instrument info',
+    columnLabel: 'zTitad / totalShares',
+    reason: 'TSETMC instrument info، فیلد تعداد سهام (medium)',
+    warning: 'تعداد سهام از داده TSETMC خوانده شده و پیش از اعمال باید با منبع رسمی تطبیق داده شود.'
+  };
+
+  return {
+    status: 'parsed',
+    reportTitle: 'TSETMC instrument info',
+    sourceReportUrl: options.insCode ? `https://www.tsetmc.com/instInfo/${options.insCode}` : undefined,
+    tableCandidates: [],
+    extractedValues: [suggestion],
+    primarySuggestions: [suggestion],
+    secondarySuggestions: [],
+    tablePreviews: [],
+    diagnostics: {
+      symbol: options.symbol,
+      codalSymbol: options.codalSymbol,
+      reportTitle: 'TSETMC instrument info',
+      reportDate: parsedAt,
+      reportUrl: options.insCode ? `https://www.tsetmc.com/instInfo/${options.insCode}` : undefined,
+      fetchTimestamp: parsedAt,
+      detectedTableCount: 0,
+      parserStatus: 'parsed',
+      parserWarnings: ['تعداد کل سهام از داده TSETMC به‌عنوان پیشنهاد قابل بررسی اضافه شد.'],
+      extractedCandidates: [suggestion],
+      rejectedCandidates: [],
+      tables: []
+    },
+    warnings: ['تعداد کل سهام از TSETMC پیشنهاد شده است و به‌تنهایی NAV را کامل نمی‌کند.'],
+    parsedAt
+  };
 }
 
 function hasCodalAppliedFields(record: ManualOverrideRecord | undefined): boolean {
@@ -849,27 +905,52 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       .then(async (result) => {
         if (!isActiveWidgetRender(root, renderId)) return;
         renderCodalDiscovery(root, result);
-        const report = result.monthlyActivityReport ?? result.financialStatementReport;
-        if (!report) {
+        const reports = [result.monthlyActivityReport, result.financialStatementReport].filter(
+          (report): report is CodalReportReference => Boolean(report)
+        );
+        if (reports.length === 0) {
           renderCodalDetail(root, {
             status: result.status === 'failed' ? 'network-error' : 'unavailable',
             errorMessage: result.errorMessage
           });
           return;
         }
-        const detailResult = await requestCodalReportDetail(report);
-        if (!isActiveWidgetRender(root, renderId)) return;
-        renderCodalDetail(root, detailResult);
-        if (detailResult.detail) {
-          renderMonthlySuggestions(
-            root,
-            parseMonthlyActivityReport(detailResult.detail),
-            options,
-            () => activeRecord,
-            (record) => {
-              activeRecord = record;
-            }
-          );
+
+        const parseResults: MonthlyActivityParseResult[] = [];
+        let renderedDetail = false;
+        const uniqueReports = reports.filter(
+          (report, index, all) =>
+            all.findIndex((candidate) => (candidate.url ?? candidate.tracingNo ?? candidate.title) === (report.url ?? report.tracingNo ?? report.title)) === index
+        );
+        for (const report of uniqueReports) {
+          const detailResult = await requestCodalReportDetail(report);
+          if (!isActiveWidgetRender(root, renderId)) return;
+          if (!renderedDetail) {
+            renderCodalDetail(root, detailResult);
+            renderedDetail = true;
+          }
+          if (detailResult.detail) {
+            parseResults.push(
+              report === result.financialStatementReport
+                ? parseFinancialStatementReport(detailResult.detail)
+                : parseMonthlyActivityReport(detailResult.detail)
+            );
+          }
+        }
+
+        if (parseResults.length > 0) {
+          if (
+            options.totalShares !== undefined &&
+            options.totalShares > 0 &&
+            !parseResults.some((parseResult) =>
+              parseResult.extractedValues.some((value) => value.kind === 'totalSharesSuggestion')
+            )
+          ) {
+            parseResults.push(tsetmcTotalSharesParseResult(options.totalShares, options));
+          }
+          renderMonthlySuggestions(root, mergeMonthlyActivityParseResults(parseResults), options, () => activeRecord, (record) => {
+            activeRecord = record;
+          });
         }
       })
       .catch((error: unknown) => {
