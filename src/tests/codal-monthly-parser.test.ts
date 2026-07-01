@@ -1038,5 +1038,11 @@ describe('parseMonthlyActivityReport', () => {
     expect(merged.extractedValues.map((value) => value.kind)).toEqual(
       expect.arrayContaining(['listedPortfolioCostValue', 'listedPortfolioMarketValue', 'equitySuggestion'])
     );
+    expect(merged.tablePreviews.map((table) => table.sourceGroup)).toEqual(
+      expect.arrayContaining(['monthly', 'financial'])
+    );
+    expect(merged.diagnostics.tables.map((table) => table.sourceGroup)).toEqual(
+      expect.arrayContaining(['monthly', 'financial'])
+    );
   });
 });

@@ -271,6 +271,32 @@ describe('tsetmc-client', () => {
     );
   });
 
+  it('does not use symbol plus price text as issuer name while keeping price detection', () => {
+    const header = {
+      textContent: 'سرمایه‌گذاری‌غدیر (وغدیر) - بازار اول بورس'
+    };
+    const noisyMainBox = {
+      textContent: 'وغدير 14,630 خرید فروش نمودار'
+    };
+    const rows = [{ textContent: '' }];
+    const documentMock = {
+      querySelectorAll: vi.fn((selector: string) => {
+        if (selector.includes('tr')) return rows;
+        if (selector.includes('bigheader')) return [header];
+        if (selector.includes('#MainBox')) return [noisyMainBox];
+        return [];
+      }),
+      querySelector: vi.fn(() => null)
+    } as unknown as Document;
+
+    const snapshot = snapshotTsetmcPage(documentMock, 'https://www.tsetmc.com/instInfo/778253364357513');
+
+    expect(snapshot.displaySymbol).toBe('وغدیر');
+    expect(snapshot.instrumentName).toBe('سرمایه‌گذاری‌غدیر');
+    expect(snapshot.instrumentName).not.toBe('وغدير 14,630');
+    expect(extractPriceCandidatesFromText('14,630', 'dom-selector').candidates[0].value).toBe(14630);
+  });
+
   it('does not treat the TSETMC site title as a stock symbol', () => {
     const title = {
       textContent: '.:TSETMC:. :: مدیریت فناوری بورس تهران',

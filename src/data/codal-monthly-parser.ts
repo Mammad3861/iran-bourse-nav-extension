@@ -57,6 +57,7 @@ export interface PortfolioTableCandidate {
 export interface ParserTablePreview {
   index: number;
   caption?: string;
+  sourceGroup?: string;
   detectedUnit?: string;
   source?: CodalExtractedTable['source'];
   reconstruction?: CodalCellTableReconstructionMetadata;
@@ -86,6 +87,7 @@ export interface ParserTotalRowCandidate {
 export interface ParserTableDiagnostics {
   tableIndex: number;
   caption?: string;
+  sourceGroup?: string;
   detectedUnit?: string;
   source?: CodalExtractedTable['source'];
   reconstruction?: CodalCellTableReconstructionMetadata;
@@ -551,7 +553,14 @@ function unitInfoForText(text: string): UnitInfo {
   };
 }
 
-function tablePreview(table: ParsedTable): ParserTablePreview {
+function sourceGroupForTable(table: ParsedTable, parserGroup: 'monthly' | 'financial'): string {
+  if (table.source === 'codal-excel') {
+    return parserGroup === 'financial' ? 'financial-excel' : 'monthly-excel';
+  }
+  return parserGroup;
+}
+
+function tablePreview(table: ParsedTable, parserGroup: 'monthly' | 'financial' = 'monthly'): ParserTablePreview {
   const text = tableText(table);
   const rawHeaders = (table.rawRows[0] ?? []).slice(0, 12);
   const normalizedHeaders = (table.rows[0] ?? []).slice(0, 12);
@@ -560,6 +569,7 @@ function tablePreview(table: ParsedTable): ParserTablePreview {
   return {
     index: table.index,
     caption: table.caption,
+    sourceGroup: sourceGroupForTable(table, parserGroup),
     detectedUnit: unitInfoForText(text).unit,
     source: table.source,
     reconstruction: table.reconstruction,
@@ -1130,7 +1140,7 @@ function tableFailureReasons(table: ParsedTable): string[] {
   return [...reasons];
 }
 
-function tableDiagnostics(table: ParsedTable): ParserTableDiagnostics {
+function tableDiagnostics(table: ParsedTable, parserGroup: 'monthly' | 'financial' = 'monthly'): ParserTableDiagnostics {
   const text = tableText(table);
   const unitInfo = unitInfoForTable(table);
   const rawHeaders = table.rawRows[0] ?? [];
@@ -1139,6 +1149,7 @@ function tableDiagnostics(table: ParsedTable): ParserTableDiagnostics {
   return {
     tableIndex: table.index,
     caption: table.caption,
+    sourceGroup: sourceGroupForTable(table, parserGroup),
     detectedUnit: unitInfo.unit,
     source: table.source,
     reconstruction: table.reconstruction,
@@ -1190,6 +1201,7 @@ function buildDiagnostics(options: {
   warnings: string[];
   extractedValues: ExtractedPortfolioValue[];
   extraRejectedCandidates?: ParserRejectedCandidate[];
+  parserGroup?: 'monthly' | 'financial';
 }): MonthlyActivityParserDiagnostics {
   return {
     symbol: options.detail.symbol,
@@ -1210,7 +1222,7 @@ function buildDiagnostics(options: {
       ...rejectedCandidatesForDiagnostics(options.tables, options.extractedValues, options.warnings),
       ...(options.extraRejectedCandidates ?? [])
     ],
-    tables: options.tables.map(tableDiagnostics)
+    tables: options.tables.map((table) => tableDiagnostics(table, options.parserGroup ?? 'monthly'))
   };
 }
 
@@ -1297,7 +1309,9 @@ function extractStandaloneFinancialValue(options: {
     const multiplier = options.kind === 'totalSharesSuggestion' ? 1 : options.unitInfo.multiplier;
     const confidence: ParseConfidence =
       options.kind === 'equitySuggestion'
-        ? consolidated || !options.unitInfo.clear
+        ? consolidated && !options.unitInfo.clear
+          ? 'low'
+          : consolidated || !options.unitInfo.clear
           ? 'medium'
           : 'high'
         : 'medium';
@@ -1342,7 +1356,7 @@ export function parseFinancialStatementReport(detail: CodalReportDetail): Monthl
   const reportPeriod = extractReportPeriod(detail);
   const invalidReason = financialStatementValidity(detail);
   const tables = invalidReason ? [] : allTablesFromDetail(detail);
-  const tablePreviews = tables.map(tablePreview);
+  const tablePreviews = tables.map((table) => tablePreview(table, 'financial'));
 
   if (invalidReason) {
     const status: MonthlyActivityParseResult['status'] = 'unsupported-report';
@@ -1356,7 +1370,7 @@ export function parseFinancialStatementReport(detail: CodalReportDetail): Monthl
       primarySuggestions: [],
       secondarySuggestions: [],
       tablePreviews: [],
-      diagnostics: buildDiagnostics({ detail, status, tables: [], warnings: [invalidReason], extractedValues: [] }),
+      diagnostics: buildDiagnostics({ detail, status, tables: [], warnings: [invalidReason], extractedValues: [], parserGroup: 'financial' }),
       warnings: [invalidReason],
       parsedAt
     };
@@ -1375,7 +1389,7 @@ export function parseFinancialStatementReport(detail: CodalReportDetail): Monthl
       primarySuggestions: [],
       secondarySuggestions: [],
       tablePreviews,
-      diagnostics: buildDiagnostics({ detail, status, tables, warnings, extractedValues: [] }),
+      diagnostics: buildDiagnostics({ detail, status, tables, warnings, extractedValues: [], parserGroup: 'financial' }),
       warnings,
       parsedAt
     };
@@ -1439,7 +1453,8 @@ export function parseFinancialStatementReport(detail: CodalReportDetail): Monthl
       tables,
       warnings,
       extractedValues,
-      extraRejectedCandidates: split.rejections
+      extraRejectedCandidates: split.rejections,
+      parserGroup: 'financial'
     }),
     warnings,
     parsedAt
@@ -1525,7 +1540,7 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   }
 
   const tables = allTablesFromDetail(detail);
-  const tablePreviews = tables.map(tablePreview);
+  const tablePreviews = tables.map((table) => tablePreview(table, 'monthly'));
 
   if (tables.length === 0) {
     const status: MonthlyActivityParseResult['status'] = 'empty';

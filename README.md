@@ -158,6 +158,8 @@ When Codal report detail is fetched but values are not extracted, open the NAV w
 
 The diagnostics section shows each detected table, detected unit, labels, raw and normalized headers, raw and normalized sample rows, total-row candidates, cost-column candidates, market-value-column candidates, rejected candidates, and extraction failure reasons. When Codal exposes a report as a technical cell model, the extension reconstructs a matrix from row/column coordinates before parsing and marks it as `جدول بازسازی‌شده از داده سلولی کدال` with cell count, dimensions, metaTable code/id, and reconstruction warnings.
 
+When monthly, Excel, financial-statement, and TSETMC suggestions are combined, table diagnostics are grouped by source in collapsed sections so the main UI stays compact. The copied parser JSON still includes the full table list and source-group metadata.
+
 The diagnostics also show `منبع ارزش روز پرتفوی بورسی`, including whether HTML/JSON detail tables, reconstructed Codal tables, and optional `ExcelUrl` tables were checked. If market-value labels such as `ارزش بازار` or `ارزش روز` are not found, the value remains manual.
 
 For reconstructed investment summary tables, candidate ranking prefers current-period columns, exact aggregate rows, and non-zero values. Prior-year columns and zero aggregate candidates are kept out of the main suggestion and recorded in rejected-candidate diagnostics.

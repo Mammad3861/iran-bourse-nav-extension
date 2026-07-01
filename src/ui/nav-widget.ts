@@ -399,6 +399,25 @@ function tsetmcTotalSharesParseResult(value: number, options: NavWidgetOptions):
   };
 }
 
+function diagnosticsTableFor(
+  result: MonthlyActivityParseResult,
+  table: MonthlyActivityParseResult['tablePreviews'][number]
+): MonthlyActivityParseResult['diagnostics']['tables'][number] | undefined {
+  return result.diagnostics.tables.find(
+    (diagnosticTable) =>
+      diagnosticTable.tableIndex === table.index &&
+      (diagnosticTable.sourceGroup ?? 'monthly') === (table.sourceGroup ?? 'monthly')
+  );
+}
+
+function diagnosticsGroupLabel(sourceGroup: string | undefined): string {
+  if (sourceGroup === 'monthly-excel') return 'نمایش جدول‌های Excel گزارش ماهانه';
+  if (sourceGroup === 'financial') return 'نمایش جدول‌های صورت مالی';
+  if (sourceGroup === 'financial-excel') return 'نمایش جدول‌های Excel صورت مالی';
+  if (sourceGroup === 'tsetmc') return 'TSETMC instrument info';
+  return 'نمایش جدول‌های گزارش ماهانه';
+}
+
 function hasCodalAppliedFields(record: ManualOverrideRecord | undefined): boolean {
   return Object.values(record?.fieldSources ?? {}).some((source) => source?.source === 'codal-suggestion');
 }
@@ -515,19 +534,31 @@ function appendMonthlyDiagnostics(
     preview.appendChild(empty);
   }
 
+  const groupedTables = new Map<string, typeof result.tablePreviews>();
   for (const table of result.tablePreviews) {
-    const item = document.createElement('details');
-    item.className = 'ibnav-table-preview';
-    const summary = document.createElement('summary');
-    summary.textContent = `جدول ${table.index}${table.caption ? ` - ${table.caption}` : ''}`;
-    item.appendChild(summary);
+    const group = table.sourceGroup ?? 'monthly';
+    groupedTables.set(group, [...(groupedTables.get(group) ?? []), table]);
+  }
+
+  for (const [group, tables] of groupedTables.entries()) {
+    const groupDetails = document.createElement('details');
+    groupDetails.className = 'ibnav-table-preview';
+    const groupSummary = document.createElement('summary');
+    groupSummary.textContent = `${diagnosticsGroupLabel(group)} (${tables.length})`;
+    groupDetails.appendChild(groupSummary);
+    for (const table of tables) {
+      const item = document.createElement('details');
+      item.className = 'ibnav-table-preview';
+      const summary = document.createElement('summary');
+      summary.textContent = `جدول ${table.index}${table.caption ? ` - ${table.caption}` : ''}`;
+      item.appendChild(summary);
     const meta = document.createElement('p');
     meta.className = 'ibnav-muted';
     meta.textContent = `واحد: ${table.detectedUnit ?? 'نامشخص'} | برچسب‌ها: ${table.detectedLabels.join('، ') || 'نامشخص'} | هشدار: ${
       table.warnings.join('، ') || '-'
     }`;
     item.appendChild(meta);
-    const diagnostic = result.diagnostics.tables.find((diagnosticTable) => diagnosticTable.tableIndex === table.index);
+    const diagnostic = diagnosticsTableFor(result, table);
     if (diagnostic) {
       if (diagnostic.reconstruction) {
         const reconstruction = document.createElement('p');
@@ -572,7 +603,9 @@ function appendMonthlyDiagnostics(
         ].join('\n')
       : table.normalizedRows.map((row) => row.join(' | ')).join('\n');
     item.appendChild(rows);
-    preview.appendChild(item);
+      groupDetails.appendChild(item);
+    }
+    preview.appendChild(groupDetails);
   }
 
   const candidateTitle = document.createElement('h5');

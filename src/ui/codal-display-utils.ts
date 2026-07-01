@@ -51,11 +51,30 @@ function hasSelectedWarnings(selection: CodalReportSelectionDiagnostics | undefi
   return Boolean(selection?.selectedReport && selection.selectedWarnings.length > 0);
 }
 
+function normalizeSymbol(value: string | undefined): string {
+  return (value ?? '')
+    .replace(/[ي]/g, 'ی')
+    .replace(/[ك]/g, 'ک')
+    .replace(/\u200c/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function isHighConfidenceMonthlySymbolMatch(selection: CodalReportSelectionDiagnostics | undefined): boolean {
+  if (!selection?.selectedReport || selection.reportKind !== 'monthly-activity' || selection.selectedConfidence !== 'high') {
+    return false;
+  }
+  return normalizeSymbol(selection.requestedSymbol) === normalizeSymbol(selection.selectedReport.symbol);
+}
+
 export function discoverySelectionNotice(result: CodalReportDiscoveryResult): string | undefined {
   const monthly = result.diagnostics?.monthlyActivity;
   const financial = result.diagnostics?.financialStatement;
   const selections = [monthly, financial];
 
+  if (isCleanSelectedReport(monthly) || isHighConfidenceMonthlySymbolMatch(monthly)) {
+    return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
+  }
   if (selections.some(isCleanSelectedReport)) {
     return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
   }

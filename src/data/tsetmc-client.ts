@@ -1,4 +1,4 @@
-import { parseLocalizedNumber } from '../core/number-utils';
+import { normalizePersianArabicDigits, parseLocalizedNumber } from '../core/number-utils';
 import {
   detectSymbolFromDocument,
   detectSymbolFromUrl,
@@ -593,15 +593,56 @@ export function detectCurrentTsetmcSymbol(documentRef: Document, href: string): 
   };
 }
 
-export function readInstrumentNameFromDocument(documentRef: Document): string | undefined {
+function normalizeIssuerText(value: string): string {
+  return normalizePersianArabicDigits(value)
+    .replace(/[ي]/g, 'ی')
+    .replace(/[ك]/g, 'ک')
+    .replace(/\u200c/g, ' ')
+    .replace(/[()（）]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function sanitizeTsetmcIssuerName(
+  value: string | undefined,
+  options: { symbol?: string; currentPrice?: number } = {}
+): string | undefined {
+  if (!value) return undefined;
+
+  const trimmed = value.replace(/\s+/g, ' ').trim();
+  const normalized = normalizeIssuerText(trimmed);
+  if (!normalized || normalized === '()') return undefined;
+  if (isTsetmcSiteLabel(normalized) || isKnownUiSymbolLabel(normalized)) return undefined;
+  if (isLikelyInsCode(normalized) || /^\d[\d,.\s]*$/.test(normalized)) return undefined;
+
+  const symbol = normalizeIssuerText(options.symbol ?? '');
+  const numericTokens = normalized.match(/[+-]?(?:\d{1,3}(?:[,٬]\d{3})+|\d+)(?:[٫.]\d+)?/g) ?? [];
+  const containsPrice = numericTokens.some((token) => {
+    const parsed = parseLocalizedNumber(token);
+    return parsed !== undefined && parsed === options.currentPrice;
+  });
+  if (containsPrice) return undefined;
+  if (symbol && new RegExp(`^${symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\d`).test(normalized)) return undefined;
+  if (/^[\u0600-\u06ffA-Za-z0-9_-]{2,24}\s+\d{1,3}(?:[,٬]\d{3})+/.test(normalized)) return undefined;
+  if (numericTokens.length > 0 && normalized.replace(/[^\d۰-۹٠-٩]/g, '').length > normalized.replace(/\s/g, '').length / 2) {
+    return undefined;
+  }
+
+  return trimmed;
+}
+
+export function readInstrumentNameFromDocument(
+  documentRef: Document,
+  options: { symbol?: string; currentPrice?: number } = {}
+): string | undefined {
   const headerText = Array.from(
-    documentRef.querySelectorAll('.bigheader, .header.bigheader, #MainBox, h1, h2, title')
+    documentRef.querySelectorAll('.bigheader, .header.bigheader, #MainBox h1, #MainBox h2, h1, h2, title')
   )
     .map((node) => node.textContent?.replace(/\s+/g, ' ').trim() ?? '')
     .find((text) => text.length > 0 && !isTsetmcSiteLabel(text));
 
   const name = headerText?.replace(/\([^)]+\)/g, '').replace(/\s+-\s+.*$/, '').trim();
-  return name && name !== '()' ? name : undefined;
+  return sanitizeTsetmcIssuerName(name, options);
 }
 
 function normalizeDomText(text: string): string {
@@ -804,7 +845,7 @@ export function snapshotTsetmcPage(documentRef: Document, href: string): TsetmcP
   return {
     displaySymbol: symbol,
     codalSymbol: isLikelyPersianSymbol(symbol) ? symbol : undefined,
-    instrumentName: readInstrumentNameFromDocument(documentRef),
+    instrumentName: readInstrumentNameFromDocument(documentRef, { symbol, currentPrice: price.selected?.value }),
     insCode,
     symbolSource: symbolDiagnostics.selected?.source === 'url' ? 'url' : symbol ? 'dom' : 'unknown',
     currentPrice: price.selected?.value,

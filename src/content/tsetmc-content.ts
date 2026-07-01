@@ -4,6 +4,7 @@ import type { ManualOverrideRecord } from '../data/manual-overrides';
 import {
   getInstrumentInfoByInsCode,
   getLatestPriceByInsCode,
+  sanitizeTsetmcIssuerName,
   snapshotTsetmcPage
 } from '../data/tsetmc-client';
 import { renderNavWidget } from '../ui/nav-widget';
@@ -28,7 +29,9 @@ async function boot(): Promise<void> {
       const apiSymbol = validateCodalSearchSymbol(info.symbol).symbol;
       displaySymbol = displaySymbol ?? apiSymbol;
       codalSymbol = codalSymbol ?? apiSymbol;
-      instrumentName = instrumentName ?? info.name;
+      instrumentName =
+        sanitizeTsetmcIssuerName(instrumentName, { symbol: displaySymbol, currentPrice }) ??
+        sanitizeTsetmcIssuerName(info.name, { symbol: apiSymbol ?? displaySymbol, currentPrice });
       totalShares = info.totalShares;
     } catch {
       // Keep DOM-only state. The widget will show a safe fallback.

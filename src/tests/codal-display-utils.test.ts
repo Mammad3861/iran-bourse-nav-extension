@@ -91,6 +91,46 @@ describe('codal display utilities', () => {
     expect(discoverySelectionNotice(result)).toBe('گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.');
   });
 
+  it('lets high-confidence normalized monthly symbol match suppress noisy financial warnings', () => {
+    const result: CodalReportDiscoveryResult = {
+      status: 'found',
+      symbol: 'وغدير',
+      sourceVerified: false,
+      checkedAt: '2026-07-01T00:00:00.000Z',
+      diagnostics: {
+        requestedSymbol: 'وغدير',
+        requestedIssuerName: 'وغدير 14,630',
+        monthlyActivity: {
+          requestedSymbol: 'وغدير',
+          requestedIssuerName: 'وغدير 14,630',
+          reportKind: 'monthly-activity',
+          selectedReport: {
+            symbol: 'وغدیر',
+            companyName: 'سرمایه گذاری غدیر',
+            title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31'
+          },
+          selectedConfidence: 'high',
+          selectedWarnings: ['نام ناشر ورودی قابل اتکا نبود.'],
+          candidates: []
+        },
+        financialStatement: {
+          requestedSymbol: 'وغدير',
+          requestedIssuerName: 'وغدير 14,630',
+          reportKind: 'financial-statement',
+          selectedReport: {
+            symbol: 'وغدیر',
+            title: 'اطلاعات و صورت‌های مالی (شرکت دیگر)'
+          },
+          selectedConfidence: 'low',
+          selectedWarnings: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'],
+          candidates: []
+        }
+      }
+    };
+
+    expect(discoverySelectionNotice(result)).toBe('گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.');
+  });
+
   it('shows issuer warning when the selected report itself has warnings', () => {
     const result: CodalReportDiscoveryResult = {
       status: 'found',
