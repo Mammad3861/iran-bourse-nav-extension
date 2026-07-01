@@ -94,9 +94,18 @@ export interface CodalExtractedTable {
 
 export interface CodalExcelDiagnostics {
   url?: string;
-  status: 'not-requested' | 'unavailable' | 'fetched' | 'unsupported-format' | 'network-error' | 'timeout';
+  status:
+    | 'not-requested'
+    | 'unavailable'
+    | 'fetched'
+    | 'unsupported-format'
+    | 'network-error'
+    | 'timeout'
+    | 'cors-blocked'
+    | 'excel-unavailable';
   contentType?: string;
   tableCount: number;
+  errorCode?: 'cors-blocked' | 'excel-unavailable' | 'network-error' | 'timeout' | 'unsupported-format';
   errorMessage?: string;
   fetchedAt?: string;
 }
@@ -1370,6 +1379,8 @@ function buildSourceStrategyDiagnostics(options: {
       ? `ExcelUrl بررسی شد؛ ${options.excelDiagnostics.tableCount} جدول قابل بررسی پیدا شد.`
       : options.excelDiagnostics.status === 'unavailable'
         ? 'ExcelUrl برای گزارش انتخاب‌شده در متادیتا وجود نداشت.'
+        : options.excelDiagnostics.errorCode === 'cors-blocked'
+          ? 'ExcelUrl به‌دلیل محدودیت CORS/دسترسی افزونه قابل بررسی نبود.'
         : `ExcelUrl قابل استفاده نبود: ${options.excelDiagnostics.errorMessage ?? options.excelDiagnostics.status}.`,
     marketValueStatus === 'found'
       ? 'ستون ارزش روز/ارزش بازار در منابع بررسی‌شده پیدا شد.'
@@ -1426,13 +1437,20 @@ async function fetchExcelTablesForReport(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Codal ExcelUrl fetch failed.';
+    const isTimeout = message.includes('timed out');
+    const isCorsLike =
+      error instanceof TypeError ||
+      /Failed to fetch|CORS|Access-Control-Allow-Origin|NetworkError/i.test(message);
     return {
       tables: [],
       diagnostics: {
         url: excelUrl,
-        status: message.includes('timed out') ? 'timeout' : 'network-error',
+        status: isTimeout ? 'timeout' : isCorsLike ? 'cors-blocked' : 'network-error',
         tableCount: 0,
-        errorMessage: message,
+        errorCode: isTimeout ? 'timeout' : isCorsLike ? 'cors-blocked' : 'network-error',
+        errorMessage: isCorsLike
+          ? 'ExcelUrl به‌دلیل محدودیت CORS/دسترسی افزونه قابل بررسی نبود.'
+          : message,
         fetchedAt: new Date().toISOString()
       }
     };

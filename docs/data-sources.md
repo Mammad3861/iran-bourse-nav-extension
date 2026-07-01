@@ -72,9 +72,11 @@ Some Codal details expose report data as a technical cell model with fields such
 
 Unsupported shapes are reported as safe warnings instead of guessed values.
 
-When a selected report includes an `ExcelUrl`, the background service worker may fetch that URL as part of the user-requested report-detail flow. This is limited to the selected report, uses the same timeout/error handling as report detail fetching, and remains best-effort. The extension only normalizes accessible HTML, JSON, CSV, or tab-separated table-like responses. Binary spreadsheet formats, blocked downloads, empty responses, or unexpected shapes are reported in source diagnostics instead of guessed.
+When a selected report includes an `ExcelUrl`, the background service worker may fetch that URL as part of the user-requested report-detail flow. This is limited to the selected report, uses the same timeout/error handling as report detail fetching, and remains best-effort. The extension only normalizes accessible HTML, JSON, CSV, or tab-separated table-like responses. Binary spreadsheet formats, CORS/access-blocked resources, blocked downloads, empty responses, or unexpected shapes are reported in source diagnostics instead of guessed.
 
 Excel-derived tables are searched for listed portfolio market/day value labels such as `ارزش بازار`, `ارزش روز`, `مبلغ بازار`, and `ارزش روز بازار`. If the selected report's Excel resource does not contain those labels, diagnostics explicitly state that the listed portfolio market value was not found there.
+
+If Chrome or the Codal host blocks the Excel resource even from the extension background context, diagnostics use `cors-blocked` and show: `ExcelUrl به‌دلیل محدودیت CORS/دسترسی افزونه قابل بررسی نبود.`
 
 ## Limited Monthly Activity Parser
 

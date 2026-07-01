@@ -26,10 +26,26 @@ describe('Codal background bridge', () => {
     for (const file of files) {
       const source = readFileSync(file, 'utf8');
       expect(source).not.toContain('search.codal.ir');
+      expect(source).not.toContain('excel.codal.ir');
       expect(source).not.toMatch(/\bfetch\s*\(/);
       expect(source).not.toContain('discoverLatestCodalReports');
       expect(source).not.toContain('getReportDetail(');
     }
+  });
+
+  it('declares the Codal Excel host permission in the MV3 manifest', () => {
+    const manifest = JSON.parse(readFileSync('manifest.json', 'utf8').replace(/^\uFEFF/, '')) as {
+      host_permissions?: string[];
+    };
+
+    expect(manifest.host_permissions).toEqual(
+      expect.arrayContaining([
+        'https://www.codal.ir/*',
+        'https://search.codal.ir/*',
+        'https://codal.ir/*',
+        'https://excel.codal.ir/*'
+      ])
+    );
   });
 
   it('rejects invalid TSETMC/site labels before Codal search', () => {

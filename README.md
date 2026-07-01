@@ -98,7 +98,7 @@ Limited public smoke testing on 2026-06-28 verified that:
 * Codal `Length` is treated as a period filter, not a page-size limit; the client keeps it at `-1`.
 * Codal report selection now ranks candidates by exact symbol, issuer/company-name match, report type, title relevance, and publish date. Suspicious subsidiary-like matches are rejected or shown with warnings in copyable diagnostics.
 * Codal detail pages may expose portfolio tables as HTML tables, embedded JSON, or script-held row/cell data. The client now reports detected content type, table count, header previews, and parser warnings when a shape is unsupported.
-* When Codal exposes `ExcelUrl` for the selected report, the background service worker can fetch that resource and normalize accessible table-like HTML/JSON/CSV/TSV responses. Unsupported or blocked Excel resources are shown in diagnostics.
+* When Codal exposes `ExcelUrl` for the selected report, the background service worker can fetch that resource and normalize accessible table-like HTML/JSON/CSV/TSV responses. Unsupported, CORS-blocked, or otherwise blocked Excel resources are shown in diagnostics.
 * Monthly parser diagnostics show table previews, detected labels, candidate values, units, table indexes, and confidence reasons to help users review unsupported or ambiguous Codal reports.
 * Parser extraction now preserves empty table cells for safer column alignment and supports explicit `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان` unit hints. Unclear units are shown as raw values with warnings rather than silently scaled.
 * The widget now shows a calculation status badge and warnings when NAV is incomplete, including cost-only Codal suggestions that would otherwise produce a misleading negative NAV.

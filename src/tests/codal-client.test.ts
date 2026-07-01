@@ -571,6 +571,39 @@ describe('codal-client', () => {
     );
   });
 
+  it('classifies blocked ExcelUrl fetches as CORS/access unavailable diagnostics', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const detailHtml = '<html><body><h1>گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31</h1></body></html>';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(detailHtml, 'text/html'))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const result = await getReportDetail(
+      {
+        symbol: 'وصندوق',
+        title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+        url: '/Reports/Decision.aspx?LetterSerial=abc',
+        excelUrl: 'https://excel.codal.ir/service/Excel/GetAll/abc'
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe('fetched');
+    expect(result.detail?.excelDiagnostics).toEqual(
+      expect.objectContaining({
+        status: 'cors-blocked',
+        errorCode: 'cors-blocked',
+        errorMessage: 'ExcelUrl به‌دلیل محدودیت CORS/دسترسی افزونه قابل بررسی نبود.'
+      })
+    );
+    expect(result.detail?.sourceStrategy?.messages).toContain(
+      'ExcelUrl به‌دلیل محدودیت CORS/دسترسی افزونه قابل بررسی نبود.'
+    );
+  });
+
   it('detects real-like script-embedded JSON tables in Codal detail HTML', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);
