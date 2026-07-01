@@ -115,7 +115,7 @@ export interface CodalSourceStrategyDiagnostics {
   reconstructedTableChecked: boolean;
   excel: CodalExcelDiagnostics;
   alternativeReportsChecked: boolean;
-  marketValueStatus: 'found' | 'not-found' | 'not-checked';
+  marketValueStatus: 'found' | 'not-found' | 'ambiguous' | 'unavailable' | 'not-checked';
   messages: string[];
 }
 

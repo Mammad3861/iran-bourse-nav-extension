@@ -88,11 +88,11 @@ export function analyzeNavCompleteness(inputs: NavInputs): NavCompletenessResult
     (inputs.equity ?? 0) +
     ((inputs.listedPortfolioMarketValue ?? 0) - (inputs.listedPortfolioCostValue ?? 0)) +
     (inputs.unlistedPortfolioSurplus ?? 0);
-  if (navTotal < 0 && cost !== undefined && cost > 0 && market === undefined) {
+  const navTotalAvailable = missingFields.length === 0;
+  if (navTotalAvailable && navTotal < 0 && cost !== undefined && cost > 0 && market === undefined) {
     warnings.push('NAV منفی به دلیل ناقص بودن ورودی‌هاست، نه لزوماً نتیجه واقعی.');
   }
 
-  const navTotalAvailable = missingFields.length === 0;
   const status: NavCalculationStatus =
     warnings.length === 0 ? 'complete' : cost !== undefined || market !== undefined ? 'needs-review' : 'incomplete';
 

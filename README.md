@@ -101,6 +101,7 @@ Limited public smoke testing on 2026-06-28 verified that:
 * When Codal exposes `ExcelUrl` for the selected report, the background service worker can fetch that resource and normalize accessible table-like HTML/JSON/CSV/TSV responses. Unsupported, CORS-blocked, or otherwise blocked Excel resources are shown in diagnostics.
 * Monthly parser diagnostics show table previews, detected labels, candidate values, units, table indexes, and confidence reasons to help users review unsupported or ambiguous Codal reports.
 * Parser extraction now preserves empty table cells for safer column alignment and supports explicit `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان` unit hints. Unclear units are shown as raw values with warnings rather than silently scaled.
+* Excel-derived parser candidates are ranked conservatively. The main UI shows at most one primary suggestion per field, while duplicate, low-ranked, zero, negative, tiny, or competing market-value candidates stay visible in parser diagnostics and are not included in bulk apply actions.
 * The widget now shows a calculation status badge and warnings when NAV is incomplete, including cost-only Codal suggestions that would otherwise produce a misleading negative NAV.
 * Incomplete NAV is not shown as a final numeric estimate; NAV total, NAV/share, and P/NAV remain unavailable until required fields are provided.
 * Codal resources can load differently depending on network routing or VPN state; failures should remain visible in diagnostics and leave the manual calculator usable.
@@ -157,6 +158,8 @@ The diagnostics section shows each detected table, detected unit, labels, raw an
 The diagnostics also show `منبع ارزش روز پرتفوی بورسی`, including whether HTML/JSON detail tables, reconstructed Codal tables, and optional `ExcelUrl` tables were checked. If market-value labels such as `ارزش بازار` or `ارزش روز` are not found, the value remains manual.
 
 For reconstructed investment summary tables, candidate ranking prefers current-period columns, exact aggregate rows, and non-zero values. Prior-year columns and zero aggregate candidates are kept out of the main suggestion and recorded in rejected-candidate diagnostics.
+
+For ExcelUrl tables, candidate ranking is even more conservative. If several plausible listed market-value candidates compete, the widget/popup do not promote any one of them as the main suggestion; use the expanded `نمایش همه کاندیدهای Excel` diagnostics to inspect row labels, column labels, units, scaled values, and ranking scores.
 
 Use `کپی تشخیص Parser` to copy a readable JSON payload with the full parser diagnostics, Codal report-selection diagnostics, parser warnings, reconstruction metadata, and table previews. Use `کپی پیش‌نمایش جدول‌ها` to copy a compact Markdown/text preview with report title, symbol, table count, headers, sample rows, reconstruction status, and failure reasons. If the browser blocks clipboard access, the extension shows a textarea fallback for manual copy.
 

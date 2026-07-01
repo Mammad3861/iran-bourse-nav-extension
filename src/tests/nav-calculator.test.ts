@@ -59,10 +59,10 @@ describe('calculateNav', () => {
       expect.arrayContaining([
         'محاسبه NAV ناقص است؛ بهای تمام‌شده وارد شده اما ارزش روز پرتفوی بورسی وارد نشده است.',
         'حقوق صاحبان سهام وارد نشده است.',
-        'تعداد کل سهام وارد نشده است؛ NAV هر سهم و P/NAV محاسبه نمی‌شود.',
-        'NAV منفی به دلیل ناقص بودن ورودی‌هاست، نه لزوماً نتیجه واقعی.'
+        'تعداد کل سهام وارد نشده است؛ NAV هر سهم و P/NAV محاسبه نمی‌شود.'
       ])
     );
+    expect(analysis.warnings.some((warning) => warning.includes('NAV منفی'))).toBe(false);
     expect(analysis.navTotalAvailable).toBe(false);
   });
 

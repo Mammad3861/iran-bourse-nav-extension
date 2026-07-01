@@ -30,6 +30,7 @@ import {
   parserDiagnosticsJson,
   parserTablePreviewText
 } from './parser-diagnostics';
+import { compactParserWarnings, sourceStrategySummaryText } from './codal-display-utils';
 import styles from './styles.css?inline';
 
 const WIDGET_ROOT_ID = 'ibnav-widget';
@@ -330,7 +331,11 @@ function suggestionText(value: ExtractedPortfolioValue): string {
   const confidence =
     value.confidence === 'high' ? 'اطمینان بالا' : value.confidence === 'medium' ? 'اطمینان متوسط' : 'اطمینان پایین';
   const unit = value.unit ? `، واحد: ${value.unit}` : '';
-  return `${value.label}: ${formatNumberFa(value.value)} (${confidence}، جدول ${value.sourceTableIndex}${unit})`;
+  const scaled =
+    value.unitMultiplier && value.unitMultiplier !== 1
+      ? ` | خام: ${value.rawText} | مقدار مقیاس‌گذاری‌شده: ${formatNumberFa(value.value)}`
+      : '';
+  return `${value.label}: ${formatNumberFa(value.value)} (${confidence}، جدول ${value.sourceTableIndex}${unit}${scaled})`;
 }
 
 function suggestionSafetyWarnings(value: ExtractedPortfolioValue, result: MonthlyActivityParseResult): string[] {
@@ -391,7 +396,37 @@ function appendMonthlyDiagnostics(
       `Excel: ${result.diagnostics.sourceStrategy.excel.status}`,
       ...result.diagnostics.sourceStrategy.messages
     ].join(' | ');
+    sourceStrategy.textContent = sourceStrategySummaryText(result.diagnostics.sourceStrategy);
     preview.appendChild(sourceStrategy);
+  }
+
+  const excelCandidates = result.secondarySuggestions.filter((value) => {
+    const table = result.diagnostics.tables.find((item) => item.tableIndex === value.sourceTableIndex);
+    return table?.source === 'codal-excel';
+  });
+  if (excelCandidates.length) {
+    const details = document.createElement('details');
+    details.className = 'ibnav-table-preview';
+    const summary = document.createElement('summary');
+    summary.textContent = 'نمایش همه کاندیدهای Excel';
+    details.appendChild(summary);
+    const body = document.createElement('pre');
+    body.className = 'ibnav-preview-code';
+    body.textContent = excelCandidates
+      .map((value) =>
+        [
+          `${value.kind} | table=${value.sourceTableIndex} | score=${value.rankingScore ?? '-'}`,
+          `row=${value.rowLabel ?? '-'} | column=${value.columnLabel ?? '-'}`,
+          `raw=${value.rawText} | unit=${value.unit ?? '-'} | scaled=${formatNumberFa(value.value)}`,
+          value.warning ? `warning=${value.warning}` : undefined,
+          value.reason ? `reason=${value.reason}` : undefined
+        ]
+          .filter(Boolean)
+          .join('\n')
+      )
+      .join('\n\n');
+    details.appendChild(body);
+    preview.appendChild(details);
   }
 
   const copyButton = document.createElement('button');
@@ -600,6 +635,11 @@ function renderMonthlySuggestions(
     ? `${result.reportTitle ?? 'گزارش کدال'} - ${result.reportPeriod}`
     : result.reportTitle ?? '-';
   warnings.textContent = result.warnings.length ? result.warnings.join(' ') : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.';
+
+  const compactWarnings = compactParserWarnings(result.warnings);
+  warnings.textContent = compactWarnings.length
+    ? compactWarnings.join(' ')
+    : 'Ù¾ÛŒØ´ Ø§Ø² Ø§Ø¹Ù…Ø§Ù„ØŒ Ø§Ø¹Ø¯Ø§Ø¯ Ø±Ø§ Ø¨Ø§ Ú¯Ø²Ø§Ø±Ø´ Ø±Ø³Ù…ÛŒ ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‡ÛŒØ¯.';
 
   list.textContent = '';
   appendMonthlyDiagnostics(list, result, (message, isError) => setApplyStatus(root, message, isError));

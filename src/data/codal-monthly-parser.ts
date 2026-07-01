@@ -23,7 +23,9 @@ export interface ExtractedPortfolioValue {
   kind: PortfolioValueKind;
   label: string;
   value: number;
+  scaledValue?: number;
   rawText: string;
+  rawValue?: number;
   period?: string;
   periodLabel?: string;
   unit?: string;
@@ -32,6 +34,10 @@ export interface ExtractedPortfolioValue {
   sourceTableIndex: number;
   sourceRowIndex?: number;
   sourceColumnIndex?: number;
+  sourceTableCaption?: string;
+  rowLabel?: string;
+  columnLabel?: string;
+  rankingScore?: number;
   reason?: string;
   warning?: string;
 }
@@ -96,6 +102,7 @@ export interface ParserTableDiagnostics {
 export interface ParserRejectedCandidate {
   tableIndex?: number;
   reason: string;
+  candidate?: ExtractedPortfolioValue;
 }
 
 export interface MonthlyActivityParserDiagnostics {
@@ -124,6 +131,8 @@ export interface MonthlyActivityParseResult {
   sourceReportUrl?: string;
   tableCandidates: PortfolioTableCandidate[];
   extractedValues: ExtractedPortfolioValue[];
+  primarySuggestions: ExtractedPortfolioValue[];
+  secondarySuggestions: ExtractedPortfolioValue[];
   tablePreviews: ParserTablePreview[];
   diagnostics: MonthlyActivityParserDiagnostics;
   warnings: string[];
@@ -751,7 +760,9 @@ function extractValuesFromTable(
         kind,
         label: valueLabel(kind),
         value: numericRow.value! * unitInfo.multiplier,
+        scaledValue: numericRow.value! * unitInfo.multiplier,
         rawText: numericRow.rawText,
+        rawValue: numericRow.value,
         period: context.isCurrentPeriod ? reportPeriod : undefined,
         periodLabel: context.periodLabel,
         unit: unitInfo.unit,
@@ -760,6 +771,9 @@ function extractValuesFromTable(
         sourceTableIndex: table.index,
         sourceRowIndex: numericRow.rowIndex,
         sourceColumnIndex: columnIndex,
+        sourceTableCaption: table.caption,
+        rowLabel: rowLabel(numericRow.row),
+        columnLabel: context.measureLabel ?? table.rows.slice(0, 6).map((row) => row[columnIndex]).filter(Boolean).join(' / '),
         reason: extractionReason({
           table,
           rowIndex: numericRow.rowIndex,
@@ -796,10 +810,173 @@ function downgradeDuplicateKinds(values: ExtractedPortfolioValue[]): ExtractedPo
       ? {
           ...value,
           confidence: 'low',
+          reason: value.reason?.replace(/\((high|medium|low)\)/, '(low)'),
           warning: value.warning ?? 'چند کاندید برای این نوع مقدار پیدا شد؛ این مقدار نیاز به بررسی دستی دارد.'
         }
       : value
   );
+}
+
+function isCompactUserFacingRejection(rejection: CandidateRejection): boolean {
+  return rejection.reason.includes('دوره قبلی') || rejection.reason.includes('دوره قبل');
+}
+
+function adjustedSourceStrategyForParser(
+  detail: CodalReportDetail,
+  primaryValues: ExtractedPortfolioValue[],
+  secondaryValues: ExtractedPortfolioValue[],
+  splitWarnings: string[]
+): CodalReportDetail['sourceStrategy'] {
+  const strategy = detail.sourceStrategy;
+  if (!strategy) return undefined;
+
+  const hasPrimaryMarket = primaryValues.some((value) => value.kind === 'listedPortfolioMarketValue');
+  const hasSecondaryMarket = secondaryValues.some((value) => value.kind === 'listedPortfolioMarketValue');
+  const marketAmbiguous = hasSecondaryMarket || splitWarnings.some((warning) => warning.includes('چند مقدار محتمل'));
+  const marketValueStatus: NonNullable<CodalReportDetail['sourceStrategy']>['marketValueStatus'] = hasPrimaryMarket
+    ? 'found'
+    : marketAmbiguous
+      ? 'ambiguous'
+      : strategy.excel.status === 'fetched' || strategy.marketValueStatus === 'not-found'
+        ? 'not-found'
+        : 'unavailable';
+  const messages = strategy.messages.filter((message) => {
+    if (marketValueStatus === 'ambiguous') {
+      return !message.includes('پیدا نشد') && !message.includes('پیدا شد.');
+    }
+    if (marketValueStatus === 'found') {
+      return !message.includes('پیدا نشد');
+    }
+    return true;
+  });
+
+  if (marketValueStatus === 'ambiguous') {
+    messages.push('ارزش روز پرتفوی بورسی در Excel پیدا شد، اما چند مقدار محتمل وجود دارد و نیاز به بررسی دستی دارد.');
+  }
+
+  return {
+    ...strategy,
+    marketValueStatus,
+    messages: [...new Set(messages)]
+  };
+}
+
+function confidenceRank(confidence: ParseConfidence): number {
+  if (confidence === 'high') return 100;
+  if (confidence === 'medium') return 65;
+  return 25;
+}
+
+function exactTotalLabel(label: string | undefined): boolean {
+  const normalized = normalizeText(label ?? '');
+  return normalized === 'جمع' || normalized === 'جمع کل' || normalized === 'مجموع';
+}
+
+function tableForValue(tables: ParsedTable[], value: ExtractedPortfolioValue): ParsedTable | undefined {
+  return tables.find((table) => table.index === value.sourceTableIndex);
+}
+
+function scoreExtractedValue(value: ExtractedPortfolioValue, tables: ParsedTable[]): number {
+  const table = tableForValue(tables, value);
+  const text = table ? tableText(table) : '';
+  let score = confidenceRank(value.confidence);
+
+  if (value.kind === 'listedPortfolioCostValue' && table?.source !== 'codal-excel') score += 35;
+  if (value.kind === 'listedPortfolioMarketValue' && table?.source === 'codal-excel') score += 10;
+  if (value.kind.startsWith('unlistedPortfolio')) score += 20;
+  if (table?.reconstruction) score += 20;
+  if (hasAny(text, listedSignals)) score += 20;
+  if (/پذیرفته\s*شده|بورسی|بازار\s*سرمایه|صورت\s*وضعیت\s*پرتفوی|پورتفوی/.test(text)) score += 15;
+  if (exactTotalLabel(value.rowLabel)) score += 25;
+  if (value.period) score += 12;
+  if (value.unit === 'نامشخص') score -= 20;
+  if ((value.unitMultiplier ?? 1) > 1) score -= 8;
+  if ((value.rawValue ?? value.value) === 0) score -= 140;
+  if (value.value < 0 || (value.rawValue ?? 0) < 0) score -= 160;
+  if (Math.abs(value.rawValue ?? value.value) > 0 && Math.abs(value.rawValue ?? value.value) < 10) score -= 80;
+  if (!value.rowLabel || !value.columnLabel) score -= 20;
+
+  return score;
+}
+
+function qualityRejectionReason(value: ExtractedPortfolioValue, tables: ParsedTable[]): string | undefined {
+  const raw = value.rawValue ?? value.value;
+  const table = tableForValue(tables, value);
+  if (raw === 0) return 'کاندید صفر از فهرست اصلی حذف شد.';
+  if (raw < 0 || value.value < 0) return 'کاندید منفی از فهرست اصلی حذف شد.';
+  if (Math.abs(raw) > 0 && Math.abs(raw) < 10 && (table?.source === 'codal-excel' || (value.unitMultiplier ?? 1) === 1)) {
+    return 'کاندید بسیار کوچک از فهرست اصلی حذف شد.';
+  }
+  return undefined;
+}
+
+function splitPrimarySuggestions(
+  values: ExtractedPortfolioValue[],
+  tables: ParsedTable[]
+): {
+  primary: ExtractedPortfolioValue[];
+  secondary: ExtractedPortfolioValue[];
+  rejections: ParserRejectedCandidate[];
+  warnings: string[];
+} {
+  const primary: ExtractedPortfolioValue[] = [];
+  const secondary: ExtractedPortfolioValue[] = [];
+  const rejections: ParserRejectedCandidate[] = [];
+  const warnings: string[] = [];
+  const byKind = new Map<PortfolioValueKind, ExtractedPortfolioValue[]>();
+
+  for (const value of values) {
+    const scored = {
+      ...value,
+      rankingScore: scoreExtractedValue(value, tables)
+    };
+    const list = byKind.get(scored.kind) ?? [];
+    list.push(scored);
+    byKind.set(scored.kind, list);
+  }
+
+  for (const [kind, candidates] of byKind.entries()) {
+    const ranked = [...candidates].sort((left, right) => (right.rankingScore ?? 0) - (left.rankingScore ?? 0));
+    const usable = ranked.filter((candidate) => !qualityRejectionReason(candidate, tables) && (candidate.rankingScore ?? 0) >= 55);
+    const rejected = ranked.filter((candidate) => !usable.includes(candidate));
+    secondary.push(...rejected);
+    rejections.push(
+      ...rejected.map((candidate) => ({
+        tableIndex: candidate.sourceTableIndex,
+        candidate,
+        reason: qualityRejectionReason(candidate, tables) ?? 'کاندید به دلیل رتبه پایین فقط در تشخیص Parser نگهداری شد.'
+      }))
+    );
+
+    if (usable.length === 0) {
+      if (kind === 'listedPortfolioMarketValue' && ranked.length > 1) {
+        warnings.push('چند کاندید کم‌اطمینان برای ارزش روز پیدا شد؛ جزئیات را بررسی کنید.');
+      }
+      continue;
+    }
+
+    const [best, second] = usable;
+    if (kind === 'listedPortfolioMarketValue' && second && (best.rankingScore ?? 0) - (second.rankingScore ?? 0) < 20) {
+      secondary.push(...usable);
+      rejections.push(
+        ...usable.map((candidate) => ({
+          tableIndex: candidate.sourceTableIndex,
+          candidate,
+          reason: 'ارزش روز پرتفوی بورسی در Excel پیدا شد، اما چند مقدار محتمل وجود دارد و نیاز به بررسی دستی دارد.'
+        }))
+      );
+      warnings.push('ارزش روز پرتفوی بورسی در Excel پیدا شد، اما چند مقدار محتمل وجود دارد و نیاز به بررسی دستی دارد.');
+      continue;
+    }
+
+    primary.push({
+      ...best,
+      reason: `${best.reason ?? ''}${best.rankingScore !== undefined ? `؛ امتیاز رتبه‌بندی: ${best.rankingScore}` : ''}`.trim()
+    });
+    secondary.push(...usable.slice(1));
+  }
+
+  return { primary, secondary, rejections, warnings };
 }
 
 function extractionFailureWarnings(candidates: PortfolioTableCandidate[], tables: ParsedTable[]): string[] {
@@ -962,6 +1139,7 @@ function buildDiagnostics(options: {
   tables: ParsedTable[];
   warnings: string[];
   extractedValues: ExtractedPortfolioValue[];
+  extraRejectedCandidates?: ParserRejectedCandidate[];
 }): MonthlyActivityParserDiagnostics {
   return {
     symbol: options.detail.symbol,
@@ -978,7 +1156,10 @@ function buildDiagnostics(options: {
     parserStatus: options.status,
     parserWarnings: options.warnings,
     extractedCandidates: options.extractedValues,
-    rejectedCandidates: rejectedCandidatesForDiagnostics(options.tables, options.extractedValues, options.warnings),
+    rejectedCandidates: [
+      ...rejectedCandidatesForDiagnostics(options.tables, options.extractedValues, options.warnings),
+      ...(options.extraRejectedCandidates ?? [])
+    ],
     tables: options.tables.map(tableDiagnostics)
   };
 }
@@ -999,6 +1180,8 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
+      primarySuggestions: [],
+      secondarySuggestions: [],
       tablePreviews: [],
       diagnostics: buildDiagnostics({ detail, status, tables: [], warnings: resultWarnings, extractedValues: [] }),
       warnings: resultWarnings,
@@ -1023,6 +1206,8 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
+      primarySuggestions: [],
+      secondarySuggestions: [],
       tablePreviews: [],
       diagnostics: buildDiagnostics({ detail, status, tables, warnings: resultWarnings, extractedValues: [] }),
       warnings: resultWarnings,
@@ -1041,6 +1226,8 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
       sourceReportUrl: detail.sourceUrl,
       tableCandidates: [],
       extractedValues: [],
+      primarySuggestions: [],
+      secondarySuggestions: [],
       tablePreviews,
       diagnostics: buildDiagnostics({ detail, status, tables, warnings: resultWarnings, extractedValues: [] }),
       warnings: resultWarnings,
@@ -1057,8 +1244,8 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     }
 
     const text = tableText(table);
-    const isListed = hasAny(text, listedSignals) || isReconstructedSummaryInvestmentTable(table);
     const isUnlisted = hasAny(text, unlistedSignals);
+    const isListed = !isUnlisted && (hasAny(text, listedSignals) || isReconstructedSummaryInvestmentTable(table));
     if (isListed) {
       extractedValues.push(
         ...extractValuesFromTable(
@@ -1104,10 +1291,18 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
           kind: 'unlistedPortfolioSurplusSuggestion',
           label: valueLabel('unlistedPortfolioSurplusSuggestion'),
           value: estimated.value - cost.value,
+          scaledValue: estimated.value - cost.value,
           rawText: `${estimated.rawText} - ${cost.rawText}`,
+          rawValue: estimated.value - cost.value,
           confidence: 'low',
+          unit: estimated.unit,
+          unitMultiplier: estimated.unitMultiplier,
           sourceTableIndex: table.index,
           sourceRowIndex: estimated.sourceRowIndex,
+          sourceColumnIndex: estimated.sourceColumnIndex,
+          sourceTableCaption: table.caption,
+          rowLabel: estimated.rowLabel,
+          columnLabel: `${estimated.columnLabel ?? ''} - ${cost.columnLabel ?? ''}`.trim(),
           reason: `اختلاف ارزش برآوردی و بهای تمام شده از جدول ${table.index}`,
           warning: 'این مقدار از اختلاف ارزش برآوردی و بهای تمام شده ساخته شده و باید دستی بررسی شود.'
         });
@@ -1115,23 +1310,29 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     }
   }
 
-  const safeExtractedValues = downgradeDuplicateKinds(extractedValues);
-  const duplicateKinds = safeExtractedValues
+  const allExtractedValues = downgradeDuplicateKinds(extractedValues);
+  const split = splitPrimarySuggestions(allExtractedValues, tables);
+  const safeExtractedValues = split.primary;
+  const duplicateKinds = allExtractedValues
     .map((value) => value.kind)
     .filter((kind, index, all) => all.indexOf(kind) !== index);
-  warnings.push(...rejectedCandidateWarnings.map((rejection) => rejection.reason));
+  warnings.push(...rejectedCandidateWarnings.filter(isCompactUserFacingRejection).map((rejection) => rejection.reason));
+  warnings.push(...split.warnings);
   warnings.push(...partialExtractionWarnings(candidates, tables, safeExtractedValues));
   if (!safeExtractedValues.some((value) => value.kind === 'listedPortfolioMarketValue')) {
     const excelStatus = detail.sourceStrategy?.excel.status;
+    const hasSecondaryMarket = split.secondary.some((value) => value.kind === 'listedPortfolioMarketValue');
     if (excelStatus === 'fetched') {
-      warnings.push('ارزش روز پرتفوی بورسی در Excel گزارش نیز پیدا نشد.');
+      if (!hasSecondaryMarket) {
+        warnings.push('ارزش روز پرتفوی بورسی در Excel گزارش نیز پیدا نشد.');
+      }
     } else if (excelStatus === 'unavailable') {
       warnings.push('ExcelUrl برای بررسی ارزش روز پرتفوی بورسی در متادیتای گزارش وجود نداشت.');
     } else if (excelStatus) {
       warnings.push(`بررسی ExcelUrl برای ارزش روز پرتفوی بورسی ناموفق بود: ${detail.sourceStrategy?.excel.errorMessage ?? excelStatus}`);
     }
   }
-  if (duplicateKinds.length > 0) {
+  if (duplicateKinds.length > 0 && split.warnings.length === 0) {
     warnings.push('چند کاندید برای یک نوع داده پیدا شد؛ نتیجه نیاز به بررسی دستی دارد.');
   }
 
@@ -1141,7 +1342,11 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
   }
 
   const status: MonthlyActivityParseResult['status'] =
-    duplicateKinds.length > 0 ? 'ambiguous' : safeExtractedValues.length > 0 ? 'parsed' : 'ambiguous';
+    split.warnings.length > 0 ? 'ambiguous' : safeExtractedValues.length > 0 ? 'parsed' : 'ambiguous';
+  const diagnosticsDetail: CodalReportDetail = {
+    ...detail,
+    sourceStrategy: adjustedSourceStrategyForParser(detail, safeExtractedValues, split.secondary, split.warnings)
+  };
 
   return {
     status,
@@ -1150,8 +1355,23 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     sourceReportUrl: detail.sourceUrl,
     tableCandidates: candidates,
     extractedValues: safeExtractedValues,
+    primarySuggestions: safeExtractedValues,
+    secondarySuggestions: split.secondary,
     tablePreviews,
-    diagnostics: buildDiagnostics({ detail, status, tables, warnings, extractedValues: safeExtractedValues }),
+    diagnostics: buildDiagnostics({
+      detail: diagnosticsDetail,
+      status,
+      tables,
+      warnings,
+      extractedValues: allExtractedValues,
+      extraRejectedCandidates: [
+        ...rejectedCandidateWarnings.map((rejection) => ({
+          tableIndex: rejection.tableIndex,
+          reason: rejection.reason
+        })),
+        ...split.rejections
+      ]
+    }),
     warnings,
     parsedAt
   };

@@ -509,7 +509,6 @@ describe('parseMonthlyActivityReport', () => {
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.stringContaining('دوره قبلی'),
-        expect.stringContaining('کاندید صفر'),
         'جدول 3: ستون ارزش بازار در جدول بازسازی‌شده پیدا نشد.'
       ])
     );
@@ -535,10 +534,16 @@ describe('parseMonthlyActivityReport', () => {
     );
 
     expect(result.extractedValues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 1234 }),
-        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: -234 })
-      ])
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 1234 })])
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioMarketValue' })])
+    );
+    expect(result.secondarySuggestions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: -234 })])
+    );
+    expect(result.diagnostics.rejectedCandidates).toEqual(
+      expect.arrayContaining([expect.objectContaining({ reason: expect.stringContaining('منفی') })])
     );
   });
 
@@ -579,10 +584,13 @@ describe('parseMonthlyActivityReport', () => {
 
     expect(result.status).toBe('ambiguous');
     expect(result.extractedValues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'listedPortfolioCostValue', confidence: 'low' }),
-        expect.objectContaining({ kind: 'listedPortfolioMarketValue', confidence: 'low' })
-      ])
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioCostValue', confidence: 'low' })])
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioMarketValue' })])
+    );
+    expect(result.secondarySuggestions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioMarketValue', confidence: 'low' })])
     );
     expect(result.warnings.join(' ')).toContain('چند کاندید');
   });
@@ -738,6 +746,134 @@ describe('parseMonthlyActivityReport', () => {
           unit: 'نامشخص',
           warning: expect.stringContaining('واحد')
         })
+      ])
+    );
+  });
+
+  it('keeps noisy Excel market candidates out of primary suggestions while preserving diagnostics', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        symbol: 'وصندوق',
+        extractedTables: [
+          {
+            index: 3,
+            source: 'codal-cell-model',
+            caption: 'SummaryOfCompanyInvestments - سرمایه گذاری های شرکت',
+            headers: ['شرح', 'دوره مالی منتهی به 1405/03/31', 'سال مالی منتهی به 1404/12/29'],
+            rows: [
+              ['شرح', 'دوره مالی منتهی به 1405/03/31', 'سال مالی منتهی به 1404/12/29'],
+              ['', 'بهای تمام شده', 'بهای تمام شده'],
+              ['سهام شرکت های قابل معامله در بازار سرمایه', '136,494,769', '135,404,798'],
+              ['جمع', '136,494,769', '135,404,798']
+            ],
+            reconstruction: {
+              kind: 'codal-cell-model',
+              metaTableCode: '2570',
+              metaTableId: '3848',
+              alias: 'SummaryOfCompanyInvestments',
+              rawCellCount: 12,
+              rowCount: 4,
+              columnCount: 3,
+              warnings: []
+            }
+          },
+          {
+            index: 10,
+            source: 'codal-excel',
+            caption: 'Codal ExcelUrl - صورت وضعیت پرتفوی پذیرفته شده در بورس',
+            headers: ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+            rows: [
+              ['شرح', 'بهای تمام شده', 'ارزش بازار'],
+              ['جمع', '136,494,769', '170,000']
+            ]
+          },
+          {
+            index: 11,
+            source: 'codal-excel',
+            caption: 'Codal ExcelUrl - صورت وضعیت پرتفوی بورسی',
+            headers: ['شرح', 'ارزش روز بازار'],
+            rows: [
+              ['شرح', 'ارزش روز بازار'],
+              ['جمع', '171,000']
+            ]
+          },
+          {
+            index: 12,
+            source: 'codal-excel',
+            caption: 'Codal ExcelUrl - صورت وضعیت پرتفوی بورسی - کاندیدهای نامعتبر',
+            headers: ['شرح', 'ارزش بازار', 'ارزش روز'],
+            rows: [
+              ['شرح', 'ارزش بازار', 'ارزش روز'],
+              ['جمع', '0', '(9)']
+            ]
+          },
+          {
+            index: 13,
+            source: 'codal-excel',
+            caption: 'Codal ExcelUrl - صورت وضعیت پرتفوی بورسی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'ارزش بازار'],
+            rows: [
+              ['شرح', 'ارزش بازار'],
+              ['جمع', '5']
+            ]
+          }
+        ],
+        excelDiagnostics: {
+          status: 'fetched',
+          tableCount: 4
+        },
+        sourceStrategy: {
+          htmlDetailChecked: true,
+          reconstructedTableChecked: true,
+          alternativeReportsChecked: false,
+          marketValueStatus: 'not-found',
+          messages: ['چند کاندید Excel برای ارزش روز پیدا شد.'],
+          excel: {
+            status: 'fetched',
+            tableCount: 4
+          }
+        }
+      })
+    );
+
+    const primaryCosts = result.extractedValues.filter((value) => value.kind === 'listedPortfolioCostValue');
+    const primaryMarkets = result.extractedValues.filter((value) => value.kind === 'listedPortfolioMarketValue');
+    const secondaryMarkets = result.secondarySuggestions.filter((value) => value.kind === 'listedPortfolioMarketValue');
+
+    expect(result.status).toBe('ambiguous');
+    expect(primaryCosts).toHaveLength(1);
+    expect(primaryCosts[0]).toEqual(
+      expect.objectContaining({
+        value: 136_494_769,
+        sourceTableIndex: 3
+      })
+    );
+    expect(primaryMarkets).toHaveLength(0);
+    expect(secondaryMarkets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceTableIndex: 10, value: 170_000 }),
+        expect.objectContaining({ sourceTableIndex: 11, value: 171_000 }),
+        expect.objectContaining({ sourceTableIndex: 12, rawValue: 0 }),
+        expect.objectContaining({ sourceTableIndex: 12, value: -9 }),
+        expect.objectContaining({ sourceTableIndex: 13, rawValue: 5, value: 5_000_000 })
+      ])
+    );
+    expect(result.diagnostics.extractedCandidates.length).toBeGreaterThan(result.extractedValues.length);
+    expect(result.diagnostics.sourceStrategy?.marketValueStatus).toBe('ambiguous');
+    expect(result.diagnostics.sourceStrategy?.messages.join(' ')).toContain('چند مقدار محتمل');
+    expect(result.diagnostics.sourceStrategy?.messages.join(' ')).not.toContain('گزارش نیز پیدا نشد');
+    expect(result.warnings.join(' ')).not.toContain('گزارش نیز پیدا نشد');
+    expect(result.warnings.join(' ')).not.toContain('ناموفق بود: fetched');
+    expect(result.warnings.join(' ')).not.toContain('کاندید صفر');
+    expect(result.diagnostics.rejectedCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: expect.stringContaining('کاندید صفر') }),
+        expect.objectContaining({ reason: expect.stringContaining('منفی') })
+      ])
+    );
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        'ارزش روز پرتفوی بورسی در Excel پیدا شد، اما چند مقدار محتمل وجود دارد و نیاز به بررسی دستی دارد.'
       ])
     );
   });

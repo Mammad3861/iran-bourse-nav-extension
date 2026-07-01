@@ -76,6 +76,8 @@ When a selected report includes an `ExcelUrl`, the background service worker may
 
 Excel-derived tables are searched for listed portfolio market/day value labels such as `ارزش بازار`, `ارزش روز`, `مبلغ بازار`, and `ارزش روز بازار`. If the selected report's Excel resource does not contain those labels, diagnostics explicitly state that the listed portfolio market value was not found there.
 
+Excel-derived candidates are ranked conservatively before they reach the main suggestion UI. The parser keeps at most one primary suggestion per NAV field, prefers current-period reconstructed report tables for listed cost, and only promotes a listed market value when one candidate is clearly stronger than competing Excel values. Duplicate, zero, negative, tiny, prior-period, or low-ranked Excel candidates remain available in parser diagnostics and the expanded Excel-candidate preview, but they are not included in bulk apply actions.
+
 If Chrome or the Codal host blocks the Excel resource even from the extension background context, diagnostics use `cors-blocked` and show: `ExcelUrl به‌دلیل محدودیت CORS/دسترسی افزونه قابل بررسی نبود.`
 
 ## Limited Monthly Activity Parser
@@ -123,6 +125,7 @@ Confidence is intentionally conservative:
 - High confidence requires a portfolio table, exact value label, one usable total row, and one valid numeric value.
 - Medium confidence is used for likely labels/tables or unlisted values that still require review.
 - Low confidence is used for ambiguous labels, duplicate candidates, multiple total rows, or derived surplus values. Low-confidence values are shown for review but are not included in bulk apply actions.
+- When multiple plausible Excel market-value candidates compete, the parser does not choose one for the main UI. It records the candidates, scores, row/column labels, units, and rejection reasons in diagnostics so the user can review them manually.
 
 Detail fetch states are explicit:
 

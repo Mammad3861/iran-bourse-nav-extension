@@ -37,6 +37,8 @@ function monthlyResult(extractedValues: ExtractedPortfolioValue[]): MonthlyActiv
     tableCandidates: [],
     tablePreviews: [],
     extractedValues,
+    primarySuggestions: extractedValues,
+    secondarySuggestions: [],
     diagnostics: {
       reportTitle: 'گزارش فعالیت ماهانه',
       reportDate: '1405/03/31',

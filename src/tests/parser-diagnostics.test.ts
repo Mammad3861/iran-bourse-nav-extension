@@ -9,6 +9,8 @@ const result: MonthlyActivityParseResult = {
   sourceReportUrl: 'https://www.codal.ir/Reports/Decision.aspx?LetterSerial=test',
   tableCandidates: [],
   extractedValues: [],
+  primarySuggestions: [],
+  secondarySuggestions: [],
   tablePreviews: [
     {
       index: 0,
