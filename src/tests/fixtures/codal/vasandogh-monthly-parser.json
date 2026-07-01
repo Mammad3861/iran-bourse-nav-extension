@@ -1,0 +1,83 @@
+{
+  "sourceUrl": "https://www.codal.ir/Reports/Decision.aspx?LetterSerial=vasandogh-smoke",
+  "title": "گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31",
+  "symbol": "وصندوق",
+  "publishedAt": "2026-06-25T09:00:00",
+  "contentType": "json",
+  "plainTextPreview": "گزارش فعالیت ماهانه وصندوق",
+  "tables": [],
+  "parserWarnings": [],
+  "fetchedAt": "2026-07-01T00:00:00.000Z",
+  "excelUrl": "https://excel.codal.ir/service/Excel/GetAll/vasandogh-smoke",
+  "excelDiagnostics": {
+    "status": "fetched",
+    "tableCount": 4,
+    "fetchedAt": "2026-07-01T00:00:00.000Z"
+  },
+  "sourceStrategy": {
+    "htmlDetailChecked": true,
+    "reconstructedTableChecked": true,
+    "alternativeReportsChecked": false,
+    "marketValueStatus": "not-found",
+    "messages": ["ExcelUrl بررسی شد؛ 4 جدول قابل بررسی پیدا شد."],
+    "excel": {
+      "status": "fetched",
+      "tableCount": 4,
+      "fetchedAt": "2026-07-01T00:00:00.000Z"
+    }
+  },
+  "extractedTables": [
+    {
+      "index": 3,
+      "source": "codal-cell-model",
+      "caption": "SummaryOfCompanyInvestments - سرمایه گذاری های شرکت",
+      "headers": ["شرح", "دوره مالی منتهی به 1405/03/31", "سال مالی منتهی به 1404/12/29"],
+      "rows": [
+        ["شرح", "دوره مالی منتهی به 1405/03/31", "سال مالی منتهی به 1404/12/29"],
+        ["", "بهای تمام شده", "بهای تمام شده"],
+        ["سهام شرکت های قابل معامله در بازار سرمایه", "136,494,769", "135,404,798"],
+        ["جمع", "136,494,769", "135,404,798"]
+      ],
+      "reconstruction": {
+        "kind": "codal-cell-model",
+        "metaTableCode": "2570",
+        "metaTableId": "3848",
+        "alias": "SummaryOfCompanyInvestments",
+        "rawCellCount": 12,
+        "rowCount": 4,
+        "columnCount": 3,
+        "warnings": []
+      }
+    },
+    {
+      "index": 10,
+      "source": "codal-excel",
+      "caption": "Codal ExcelUrl - صورت وضعیت پرتفوی پذیرفته شده در بورس",
+      "headers": ["شرح", "بهای تمام شده", "ارزش بازار"],
+      "rows": [
+        ["شرح", "بهای تمام شده", "ارزش بازار"],
+        ["جمع", "136,494,769", "170,000"]
+      ]
+    },
+    {
+      "index": 11,
+      "source": "codal-excel",
+      "caption": "Codal ExcelUrl - صورت وضعیت پرتفوی بورسی",
+      "headers": ["شرح", "ارزش روز بازار"],
+      "rows": [
+        ["شرح", "ارزش روز بازار"],
+        ["جمع", "171,000"]
+      ]
+    },
+    {
+      "index": 12,
+      "source": "codal-excel",
+      "caption": "Codal ExcelUrl - صورت وضعیت پرتفوی بورسی - کاندیدهای نامعتبر",
+      "headers": ["شرح", "ارزش بازار", "ارزش روز"],
+      "rows": [
+        ["شرح", "ارزش بازار", "ارزش روز"],
+        ["جمع", "0", "(9)"]
+      ]
+    }
+  ]
+}
