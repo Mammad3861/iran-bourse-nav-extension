@@ -19,6 +19,7 @@ export interface CodalReportReference {
   reportId?: string;
   letterCode?: string;
   url?: string;
+  excelUrl?: string;
   raw?: unknown;
   selectionDiagnostics?: CodalReportSelectionDiagnostics;
 }
@@ -84,11 +85,29 @@ export interface CodalCellTableReconstructionMetadata {
 
 export interface CodalExtractedTable {
   index: number;
-  source: 'html-table' | 'html-row-structure' | 'script-json' | 'json' | 'codal-cell-model';
+  source: 'html-table' | 'html-row-structure' | 'script-json' | 'json' | 'codal-cell-model' | 'codal-excel';
   caption?: string;
   headers: string[];
   rows: string[][];
   reconstruction?: CodalCellTableReconstructionMetadata;
+}
+
+export interface CodalExcelDiagnostics {
+  url?: string;
+  status: 'not-requested' | 'unavailable' | 'fetched' | 'unsupported-format' | 'network-error' | 'timeout';
+  contentType?: string;
+  tableCount: number;
+  errorMessage?: string;
+  fetchedAt?: string;
+}
+
+export interface CodalSourceStrategyDiagnostics {
+  htmlDetailChecked: boolean;
+  reconstructedTableChecked: boolean;
+  excel: CodalExcelDiagnostics;
+  alternativeReportsChecked: boolean;
+  marketValueStatus: 'found' | 'not-found' | 'not-checked';
+  messages: string[];
 }
 
 export interface CodalReportDetail {
@@ -102,6 +121,9 @@ export interface CodalReportDetail {
   contentType: 'html' | 'json' | 'unknown';
   rawHtml?: string;
   rawJson?: unknown;
+  excelUrl?: string;
+  excelDiagnostics?: CodalExcelDiagnostics;
+  sourceStrategy?: CodalSourceStrategyDiagnostics;
   plainTextPreview: string;
   tables: CodalTableMetadata[];
   extractedTables: CodalExtractedTable[];
@@ -287,6 +309,7 @@ function normalizeReport(raw: unknown, fallbackSymbol: string): CodalReportRefer
     reportId: getString(record, ['LetterSerial', 'letterSerial', 'ReportId', 'reportId', 'Id', 'id']),
     letterCode: getString(record, ['LetterCode', 'letterCode']),
     url: absoluteCodalUrl(getString(record, ['Url', 'url', 'ReportUrl', 'reportUrl', 'Link', 'link'])),
+    excelUrl: absoluteCodalUrl(getString(record, ['ExcelUrl', 'excelUrl', 'ExcelURL', 'excelURL', 'ExportUrl', 'exportUrl'])),
     raw
   };
 }
@@ -1222,6 +1245,66 @@ export function extractTablesFromHtml(html: string): CodalExtractedTable[] {
   return dedupeTables([...htmlTables, ...rowTables, ...scriptTables]);
 }
 
+function parseDelimitedRows(text: string): string[][] {
+  const delimiter = text.includes('\t') ? '\t' : text.includes(';') ? ';' : ',';
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.split(delimiter).map((cell) => normalizeCell(cell.replace(/^"|"$/g, ''))))
+    .filter((row) => row.some(Boolean));
+}
+
+function extractDelimitedTables(text: string): CodalExtractedTable[] {
+  const rows = parseDelimitedRows(text);
+  if (rows.length < 2 || rows.reduce((max, row) => Math.max(max, row.length), 0) < 2) {
+    return [];
+  }
+
+  return [
+    {
+      index: 0,
+      source: 'codal-excel',
+      caption: 'Codal ExcelUrl',
+      headers: rows[0],
+      rows
+    }
+  ];
+}
+
+function markExcelTables(tables: CodalExtractedTable[], startIndex: number): CodalExtractedTable[] {
+  return tables.map((table, offset) => ({
+    ...table,
+    index: startIndex + offset,
+    source: 'codal-excel',
+    caption: table.caption ?? 'Codal ExcelUrl'
+  }));
+}
+
+function extractTablesFromExcelResponse(body: string | unknown, contentType: string, startIndex: number): CodalExtractedTable[] {
+  if (typeof body !== 'string') {
+    return markExcelTables(extractJsonTableObjects(body, 'codal-excel'), startIndex);
+  }
+
+  const trimmed = body.trim();
+  if (!trimmed || trimmed.startsWith('PK\u0003\u0004') || trimmed.startsWith('%PDF')) {
+    return [];
+  }
+
+  if (contentType.includes('json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    const parsed = parseJsonCandidate(trimmed);
+    return parsed ? markExcelTables(extractJsonTableObjects(parsed, 'codal-excel'), startIndex) : [];
+  }
+
+  if (/<table|<html|<body/i.test(trimmed)) {
+    return markExcelTables(extractTablesFromHtml(trimmed), startIndex);
+  }
+
+  if (contentType.includes('csv') || contentType.includes('text/plain') || /[\t,;]/.test(trimmed)) {
+    return markExcelTables(extractDelimitedTables(trimmed), startIndex);
+  }
+
+  return [];
+}
+
 export function extractTableMetadataFromHtml(html: string): CodalTableMetadata[] {
   return tableMetadataFromExtractedTables(extractTablesFromHtml(html));
 }
@@ -1261,6 +1344,131 @@ function detailWarningsFor(
     return ['ساختار JSON گزارش هنوز در Parser پشتیبانی نمی‌شود.'];
   }
   return ['نوع محتوای گزارش ناشناخته است یا پاسخ خالی/مسدود شده است.'];
+}
+
+function hasMarketValueColumn(tables: CodalExtractedTable[]): boolean {
+  return tables.some((table) =>
+    table.rows
+      .slice(0, 8)
+      .flat()
+      .some((cell) => /ارزش\s*بازار|ارزش\s*روز|مبلغ\s*بازار|ارزش\s*روز\s*بازار/.test(normalizeCell(cell)))
+  );
+}
+
+function buildSourceStrategyDiagnostics(options: {
+  detailTables: CodalExtractedTable[];
+  excelDiagnostics: CodalExcelDiagnostics;
+}): CodalSourceStrategyDiagnostics {
+  const reconstructedTableChecked = options.detailTables.some((table) => table.source === 'codal-cell-model');
+  const excelChecked = options.excelDiagnostics.status === 'fetched';
+  const allTables = options.detailTables;
+  const marketValueStatus = hasMarketValueColumn(allTables) ? 'found' : 'not-found';
+  const messages = [
+    'جزئیات HTML/JSON گزارش بررسی شد.',
+    reconstructedTableChecked ? 'جدول‌های بازسازی‌شده از مدل سلولی کدال بررسی شد.' : 'جدول بازسازی‌شده از مدل سلولی کدال در این جزئیات وجود نداشت.',
+    options.excelDiagnostics.status === 'fetched'
+      ? `ExcelUrl بررسی شد؛ ${options.excelDiagnostics.tableCount} جدول قابل بررسی پیدا شد.`
+      : options.excelDiagnostics.status === 'unavailable'
+        ? 'ExcelUrl برای گزارش انتخاب‌شده در متادیتا وجود نداشت.'
+        : `ExcelUrl قابل استفاده نبود: ${options.excelDiagnostics.errorMessage ?? options.excelDiagnostics.status}.`,
+    marketValueStatus === 'found'
+      ? 'ستون ارزش روز/ارزش بازار در منابع بررسی‌شده پیدا شد.'
+      : excelChecked
+        ? 'ارزش روز پرتفوی بورسی در Excel گزارش نیز پیدا نشد.'
+        : 'ارزش روز پرتفوی بورسی در جزئیات گزارش پیدا نشد و ExcelUrl قابل بررسی نبود.'
+  ];
+
+  return {
+    htmlDetailChecked: true,
+    reconstructedTableChecked,
+    excel: options.excelDiagnostics,
+    alternativeReportsChecked: false,
+    marketValueStatus,
+    messages
+  };
+}
+
+async function fetchExcelTablesForReport(
+  report: CodalReportReference | undefined,
+  options: CodalSearchOptions,
+  startIndex: number
+): Promise<{ tables: CodalExtractedTable[]; diagnostics: CodalExcelDiagnostics }> {
+  const excelUrl = absoluteCodalUrl(report?.excelUrl);
+  if (!excelUrl) {
+    return {
+      tables: [],
+      diagnostics: {
+        url: report?.excelUrl,
+        status: 'unavailable',
+        tableCount: 0,
+        errorMessage: 'ExcelUrl برای این گزارش در متادیتای کدال وجود ندارد.'
+      }
+    };
+  }
+
+  try {
+    const response = await fetchTextOrJsonWithTimeout(
+      excelUrl,
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      options.fetchImpl ?? fetch
+    );
+    const tables = extractTablesFromExcelResponse(response.body, response.contentType, startIndex);
+    return {
+      tables,
+      diagnostics: {
+        url: excelUrl,
+        status: tables.length > 0 ? 'fetched' : 'unsupported-format',
+        contentType: response.contentType,
+        tableCount: tables.length,
+        errorMessage: tables.length > 0 ? undefined : 'ExcelUrl دریافت شد اما جدول قابل پشتیبانی در آن پیدا نشد.',
+        fetchedAt: new Date().toISOString()
+      }
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Codal ExcelUrl fetch failed.';
+    return {
+      tables: [],
+      diagnostics: {
+        url: excelUrl,
+        status: message.includes('timed out') ? 'timeout' : 'network-error',
+        tableCount: 0,
+        errorMessage: message,
+        fetchedAt: new Date().toISOString()
+      }
+    };
+  }
+}
+
+async function enrichDetailWithExcel(
+  result: CodalReportDetailResult,
+  report: CodalReportReference | undefined,
+  options: CodalSearchOptions
+): Promise<CodalReportDetailResult> {
+  if (!result.detail) {
+    return result;
+  }
+
+  const existingTables = result.detail.extractedTables;
+  const excel = await fetchExcelTablesForReport(report, options, existingTables.length);
+  const extractedTables = [...existingTables, ...excel.tables];
+  const tables = tableMetadataFromExtractedTables(extractedTables);
+  const sourceStrategy = buildSourceStrategyDiagnostics({
+    detailTables: extractedTables,
+    excelDiagnostics: excel.diagnostics
+  });
+
+  return {
+    ...result,
+    detail: {
+      ...result.detail,
+      excelUrl: report?.excelUrl,
+      excelDiagnostics: excel.diagnostics,
+      sourceStrategy,
+      extractedTables,
+      tables,
+      parserWarnings: [...result.detail.parserWarnings, ...sourceStrategy.messages.filter((message) => message.includes('پیدا نشد'))]
+    }
+  };
 }
 
 export function isMonthlyActivityReport(title: string): boolean {
@@ -1516,7 +1724,11 @@ export async function getReportDetailByUrl(
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       options.fetchImpl ?? fetch
     );
-    const result = normalizeDetailFromBody(sourceUrl, response.body, response.contentType, report);
+    const result = await enrichDetailWithExcel(
+      normalizeDetailFromBody(sourceUrl, response.body, response.contentType, report),
+      report,
+      options
+    );
     await setCachedDetail(sourceUrl, result);
     return result;
   } catch (error) {

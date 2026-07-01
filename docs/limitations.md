@@ -19,6 +19,8 @@ This extension provides an estimate, not an audited valuation.
 - Generic clarification letters may appear in search results; they are downgraded and should not be treated as audited financial statements without manual review.
 - Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
 - Detected Codal tables may come from HTML, JSON, script-embedded data, or Codal cell-model arrays. Row and column counts or header previews do not imply the report format is fully supported for value extraction.
+- Some Codal search results expose an `ExcelUrl`. The extension can try that selected-report resource through the background service worker, but it only supports accessible table-like HTML, JSON, CSV, or tab-separated text. Binary spreadsheet downloads or blocked resources are reported as unsupported/unavailable.
+- Listed portfolio market value may not exist in every monthly report or Excel resource. When `ارزش بازار` / `ارزش روز` labels are not found, the field stays manual and NAV remains incomplete.
 - Codal cell-model reconstruction groups cells by meta table and rebuilds matrices from row/column coordinates or A1-style addresses. Missing coordinates, duplicate coordinates, merged-cell layouts, or unexpected row/column sequences can still produce incomplete previews or downgraded suggestions.
 - If a Codal detail page is PDF-like, empty, blocked, or shaped differently from supported table patterns, the UI should explain that no supported table was detected.
 - Unsupported Codal report formats are expected and should not block manual NAV calculations.

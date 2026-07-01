@@ -62,6 +62,7 @@ The Codal client can fetch a discovered report detail page by URL, report id, or
 - A short plain-text preview with Persian/Arabic digits normalized.
 - Detected table metadata such as table count, row count, column count, captions, headers, header previews, and the detection source.
 - Normalized extracted table rows when available.
+- Optional `ExcelUrl` metadata when Codal search exposes it.
 - Parser warnings when a response is empty, PDF-like, unsupported JSON, or has no supported table shape.
 - Fetch timestamp.
 
@@ -70,6 +71,10 @@ The parser foundation is intentionally conservative. It strips scripts/styles be
 Some Codal details expose report data as a technical cell model with fields such as `metaTableCode`, `metaTableId`, `address`, `rowSequence`, `columnSequence`, `cellGroupName`, and `value`. The client groups those cells by meta table, reconstructs a matrix from row/column coordinates or A1-style addresses, and records reconstruction metadata such as raw cell count, reconstructed dimensions, meta table id/code, and coordinate warnings. The monthly parser uses the reconstructed matrix so technical fields like `metaTableId` and `address` are not treated as business headers.
 
 Unsupported shapes are reported as safe warnings instead of guessed values.
+
+When a selected report includes an `ExcelUrl`, the background service worker may fetch that URL as part of the user-requested report-detail flow. This is limited to the selected report, uses the same timeout/error handling as report detail fetching, and remains best-effort. The extension only normalizes accessible HTML, JSON, CSV, or tab-separated table-like responses. Binary spreadsheet formats, blocked downloads, empty responses, or unexpected shapes are reported in source diagnostics instead of guessed.
+
+Excel-derived tables are searched for listed portfolio market/day value labels such as `ارزش بازار`, `ارزش روز`, `مبلغ بازار`, and `ارزش روز بازار`. If the selected report's Excel resource does not contain those labels, diagnostics explicitly state that the listed portfolio market value was not found there.
 
 ## Limited Monthly Activity Parser
 

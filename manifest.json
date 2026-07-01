@@ -45,7 +45,8 @@
                              "https://cdn.tsetmc.com/*",
                              "https://www.codal.ir/*",
                              "https://codal.ir/*",
-                             "https://search.codal.ir/*"
+                             "https://search.codal.ir/*",
+                             "https://excel.codal.ir/*"
                          ],
     "icons":  {
                   "16":  "icons/icon.svg",

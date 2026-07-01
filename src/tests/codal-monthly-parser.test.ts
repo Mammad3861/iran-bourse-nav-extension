@@ -185,6 +185,95 @@ describe('parseMonthlyActivityReport', () => {
     );
   });
 
+  it('extracts listed market value from an accessible Codal ExcelUrl table suggestion only', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        extractedTables: [
+          {
+            index: 0,
+            source: 'codal-excel',
+            caption: 'Codal ExcelUrl - صورت وضعیت پورتفوی پذیرفته شده در بورس',
+            headers: ['شرح', 'بهای تمام شده', 'ارزش روز بازار'],
+            rows: [
+              ['شرح', 'بهای تمام شده', 'ارزش روز بازار'],
+              ['سرمایه گذاری در سهام شرکت الف', '100', '180'],
+              ['جمع', '100', '180']
+            ]
+          }
+        ],
+        excelUrl: 'https://www.codal.ir/Reports/ExportExcel.aspx?LetterSerial=test',
+        excelDiagnostics: {
+          url: 'https://www.codal.ir/Reports/ExportExcel.aspx?LetterSerial=test',
+          status: 'fetched',
+          tableCount: 1
+        },
+        sourceStrategy: {
+          htmlDetailChecked: true,
+          reconstructedTableChecked: false,
+          alternativeReportsChecked: false,
+          marketValueStatus: 'found',
+          messages: ['ExcelUrl بررسی شد؛ 1 جدول قابل بررسی پیدا شد.'],
+          excel: {
+            url: 'https://www.codal.ir/Reports/ExportExcel.aspx?LetterSerial=test',
+            status: 'fetched',
+            tableCount: 1
+          }
+        }
+      })
+    );
+
+    expect(result.status).toBe('parsed');
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 180, sourceTableIndex: 0 })
+      ])
+    );
+    expect(result.diagnostics.sourceStrategy?.excel.status).toBe('fetched');
+  });
+
+  it('warns clearly when Excel was checked but has no listed market value', () => {
+    const result = parseMonthlyActivityReport(
+      detail({
+        extractedTables: [
+          {
+            index: 0,
+            source: 'codal-excel',
+            caption: 'Codal ExcelUrl - سرمایه گذاری ها',
+            headers: ['شرح', 'بهای تمام شده'],
+            rows: [
+              ['شرح', 'بهای تمام شده'],
+              ['سرمایه گذاری در سهام', '100'],
+              ['جمع', '100']
+            ]
+          }
+        ],
+        excelDiagnostics: {
+          status: 'fetched',
+          tableCount: 1
+        },
+        sourceStrategy: {
+          htmlDetailChecked: true,
+          reconstructedTableChecked: false,
+          alternativeReportsChecked: false,
+          marketValueStatus: 'not-found',
+          messages: ['ارزش روز پرتفوی بورسی در Excel گزارش نیز پیدا نشد.'],
+          excel: {
+            status: 'fetched',
+            tableCount: 1
+          }
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 100 })])
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'listedPortfolioMarketValue' })])
+    );
+    expect(result.warnings).toContain('ارزش روز پرتفوی بورسی در Excel گزارش نیز پیدا نشد.');
+  });
+
   it('extracts values from a Codal-like total row labeled جمع', () => {
     const result = parseMonthlyActivityReport(
       detail({

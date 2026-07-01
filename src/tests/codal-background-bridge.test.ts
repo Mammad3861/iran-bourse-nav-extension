@@ -111,6 +111,37 @@ describe('Codal background bridge', () => {
     expect(response).toEqual(expect.objectContaining({ ok: true }));
   });
 
+  it('background handler calls Codal client for report detail requests', async () => {
+    const dependencies = mockDependencies();
+    const report = {
+      symbol: 'وصندوق',
+      title: 'گزارش فعالیت ماهانه',
+      url: 'https://www.codal.ir/Reports/Decision.aspx?LetterSerial=abc',
+      excelUrl: 'https://www.codal.ir/Reports/ExportExcel.aspx?LetterSerial=abc'
+    };
+    dependencies.getReportDetail.mockResolvedValue({
+      status: 'fetched',
+      detail: {
+        sourceUrl: report.url,
+        title: report.title,
+        symbol: report.symbol,
+        contentType: 'html',
+        plainTextPreview: '',
+        tables: [],
+        extractedTables: [],
+        parserWarnings: [],
+        fetchedAt: '2026-06-28T00:00:00.000Z'
+      }
+    });
+    const handler = createCodalMessageHandler(dependencies);
+
+    const response = await handler({ type: 'CODAL_GET_REPORT_DETAIL', report });
+
+    expect(dependencies.getReportDetail).toHaveBeenCalledTimes(1);
+    expect(dependencies.getReportDetail).toHaveBeenCalledWith(report);
+    expect(response).toEqual(expect.objectContaining({ ok: true }));
+  });
+
   it('passes issuer name through discovery messages when available', async () => {
     const dependencies = mockDependencies();
     dependencies.discoverLatestCodalReports.mockResolvedValue({

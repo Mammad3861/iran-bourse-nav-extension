@@ -382,6 +382,18 @@ function appendMonthlyDiagnostics(
   previewTitle.textContent = 'نمایش جزئیات تشخیص Parser';
   preview.appendChild(previewTitle);
 
+  if (result.diagnostics.sourceStrategy) {
+    const sourceStrategy = document.createElement('p');
+    sourceStrategy.className = 'ibnav-muted';
+    sourceStrategy.textContent = [
+      'منبع ارزش روز پرتفوی بورسی',
+      `وضعیت: ${result.diagnostics.sourceStrategy.marketValueStatus === 'found' ? 'پیدا شد' : 'پیدا نشد'}`,
+      `Excel: ${result.diagnostics.sourceStrategy.excel.status}`,
+      ...result.diagnostics.sourceStrategy.messages
+    ].join(' | ');
+    preview.appendChild(sourceStrategy);
+  }
+
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
   copyButton.className = 'ibnav-apply ibnav-secondary';

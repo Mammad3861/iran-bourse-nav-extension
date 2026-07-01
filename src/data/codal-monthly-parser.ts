@@ -4,6 +4,7 @@ import {
   type CodalExtractedTable,
   type CodalReportDetail,
   type CodalReportSelectionDiagnostics,
+  type CodalSourceStrategyDiagnostics,
   isMonthlyActivityReport,
   reconstructCodalCellTable,
   stripUnsafeHtml
@@ -106,6 +107,7 @@ export interface MonthlyActivityParserDiagnostics {
   tracingNo?: string;
   reportId?: string;
   reportSelection?: CodalReportSelectionDiagnostics;
+  sourceStrategy?: CodalSourceStrategyDiagnostics;
   fetchTimestamp?: string;
   detectedTableCount: number;
   parserStatus: MonthlyActivityParseResult['status'];
@@ -970,6 +972,7 @@ function buildDiagnostics(options: {
     tracingNo: options.detail.tracingNo,
     reportId: options.detail.reportId,
     reportSelection: options.detail.selectionDiagnostics,
+    sourceStrategy: options.detail.sourceStrategy,
     fetchTimestamp: options.detail.fetchedAt,
     detectedTableCount: options.tables.length,
     parserStatus: options.status,
@@ -1118,6 +1121,16 @@ export function parseMonthlyActivityReport(detail: CodalReportDetail): MonthlyAc
     .filter((kind, index, all) => all.indexOf(kind) !== index);
   warnings.push(...rejectedCandidateWarnings.map((rejection) => rejection.reason));
   warnings.push(...partialExtractionWarnings(candidates, tables, safeExtractedValues));
+  if (!safeExtractedValues.some((value) => value.kind === 'listedPortfolioMarketValue')) {
+    const excelStatus = detail.sourceStrategy?.excel.status;
+    if (excelStatus === 'fetched') {
+      warnings.push('ارزش روز پرتفوی بورسی در Excel گزارش نیز پیدا نشد.');
+    } else if (excelStatus === 'unavailable') {
+      warnings.push('ExcelUrl برای بررسی ارزش روز پرتفوی بورسی در متادیتای گزارش وجود نداشت.');
+    } else if (excelStatus) {
+      warnings.push(`بررسی ExcelUrl برای ارزش روز پرتفوی بورسی ناموفق بود: ${detail.sourceStrategy?.excel.errorMessage ?? excelStatus}`);
+    }
+  }
   if (duplicateKinds.length > 0) {
     warnings.push('چند کاندید برای یک نوع داده پیدا شد؛ نتیجه نیاز به بررسی دستی دارد.');
   }

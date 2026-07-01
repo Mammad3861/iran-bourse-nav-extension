@@ -524,6 +524,53 @@ describe('codal-client', () => {
     );
   });
 
+  it('captures ExcelUrl metadata and appends accessible Excel-like tables to report detail', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const detailHtml = '<html><body><h1>گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31</h1></body></html>';
+    const excelText = [
+      'شرح\tبهای تمام شده\tارزش بازار',
+      'سرمایه گذاری در سهام\t100\t180',
+      'جمع\t100\t180'
+    ].join('\n');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(detailResponse(detailHtml, 'text/html'))
+      .mockResolvedValueOnce(detailResponse(excelText, 'text/tab-separated-values'));
+
+    const result = await getReportDetail(
+      {
+        symbol: 'وصندوق',
+        title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+        url: '/Reports/Decision.aspx?LetterSerial=abc',
+        excelUrl: '/Reports/ExportExcel.aspx?LetterSerial=abc'
+      },
+      { fetchImpl: fetchMock as unknown as typeof fetch }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe('https://www.codal.ir/Reports/ExportExcel.aspx?LetterSerial=abc');
+    expect(result.detail?.excelDiagnostics).toEqual(
+      expect.objectContaining({
+        status: 'fetched',
+        tableCount: 1
+      })
+    );
+    expect(result.detail?.sourceStrategy).toEqual(
+      expect.objectContaining({
+        marketValueStatus: 'found'
+      })
+    );
+    expect(result.detail?.extractedTables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'codal-excel',
+          headers: ['شرح', 'بهای تمام شده', 'ارزش بازار']
+        })
+      ])
+    );
+  });
+
   it('detects real-like script-embedded JSON tables in Codal detail HTML', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);
