@@ -435,6 +435,47 @@ describe('codal-client', () => {
     );
   });
 
+  it('does not display subsidiary financial statements as issuer financial reports', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'سرمایه گذاری غدیر',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+            PublishDateTime: '2026-06-25T09:00:00'
+          },
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'سرمایه گذاری غدیر',
+            Title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره 6 ماهه منتهی به 1404/12/29 (حسابرسی شده) (شرکت ایران مارین سرویسز)',
+            PublishDateTime: '2026-06-24T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('وغدیر', {
+      requestedIssuerName: 'سرمايه‌گذاري‌غدير(هلدينگ‌',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('found');
+    expect(result.monthlyActivityReport?.selectionDiagnostics?.selectedConfidence).toBe('high');
+    expect(result.financialStatementReport).toBeUndefined();
+    expect(result.diagnostics?.financialStatement?.selectedConfidence).toBe('none');
+    expect(result.diagnostics?.financialStatement?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          report: expect.objectContaining({ title: expect.stringContaining('ایران مارین سرویسز') }),
+          rejectedReasons: expect.arrayContaining(['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'])
+        })
+      ])
+    );
+  });
+
   it('includes rejected candidate reasons in report selection diagnostics', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);

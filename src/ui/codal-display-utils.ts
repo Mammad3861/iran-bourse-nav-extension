@@ -77,5 +77,5 @@ export function reportSummary(report: CodalReportReference | undefined): string 
 }
 
 export function financialReportSummary(report: CodalReportReference | undefined): string {
-  return report ? reportSummary(report) : 'صورت مالی معتبر پیدا نشد';
+  return report ? reportSummary(report) : 'صورت مالی معتبر برای ناشر پیدا نشد';
 }

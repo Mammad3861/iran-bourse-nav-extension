@@ -590,7 +590,12 @@ function scoreReportCandidate(options: {
       /(شرکت|صنعتی|بازرگانی|تولیدی|سرمایهگذاری|هلدینگ)/.test(compactSegment);
     if (segmentMentionsDifferentCompany) {
       score -= 70;
-      warnings.push('عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.');
+      const reason = 'عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.';
+      if (kind === 'financial-statement') {
+        rejectedReasons.push(reason);
+      } else {
+        warnings.push(reason);
+      }
     }
   }
 
@@ -618,6 +623,25 @@ function selectedConfidence(score: number, warnings: string[]): CodalReportSelec
   return 'none';
 }
 
+function isValidSelectedCandidate(
+  candidate: Omit<CodalReportSelectionCandidate, 'selected'> | undefined,
+  confidence: CodalReportSelectionDiagnostics['selectedConfidence'],
+  kind: CodalReportKind
+): candidate is CodalReportSelectionCandidate {
+  if (!candidate || candidate.rejectedReasons.length > 0 || confidence === 'none') {
+    return false;
+  }
+  if (kind !== 'financial-statement') {
+    return true;
+  }
+  return (
+    (confidence === 'high' || confidence === 'medium') &&
+    candidate.score >= 50 &&
+    candidate.warnings.length === 0 &&
+    isStrongFinancialStatementTitle(candidate.report.title)
+  );
+}
+
 function selectReportByRank(
   reports: CodalReportReference[],
   requestedSymbol: string,
@@ -629,16 +653,17 @@ function selectReportByRank(
     .sort((left, right) => right.score - left.score || publishTime(right.report) - publishTime(left.report));
   const selected = scored.find((candidate) => candidate.rejectedReasons.length === 0 && candidate.score >= 70);
   const confidence = selected ? selectedConfidence(selected.score, selected.warnings) : 'none';
+  const validSelected = isValidSelectedCandidate(selected, confidence, kind);
   const diagnostics: CodalReportSelectionDiagnostics = {
     requestedSymbol,
     requestedIssuerName,
     reportKind: kind,
-    selectedReport: selected && confidence !== 'none' ? { ...selected.report, selectionDiagnostics: undefined } : undefined,
-    selectedConfidence: confidence,
-    selectedWarnings: selected?.warnings ?? [],
+    selectedReport: validSelected ? { ...selected.report, selectionDiagnostics: undefined } : undefined,
+    selectedConfidence: validSelected ? confidence : 'none',
+    selectedWarnings: validSelected ? selected.warnings : [],
     candidates: scored.map((candidate) => ({
       ...candidate,
-      selected: candidate === selected && confidence !== 'none'
+      selected: validSelected && candidate === selected
     }))
   };
 

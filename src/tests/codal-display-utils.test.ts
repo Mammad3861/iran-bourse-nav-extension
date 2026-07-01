@@ -123,6 +123,6 @@ describe('codal display utilities', () => {
   });
 
   it('labels missing financial statements clearly', () => {
-    expect(financialReportSummary(undefined)).toBe('صورت مالی معتبر پیدا نشد');
+    expect(financialReportSummary(undefined)).toBe('صورت مالی معتبر برای ناشر پیدا نشد');
   });
 });
