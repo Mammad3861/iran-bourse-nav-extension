@@ -11,6 +11,9 @@ This extension provides an estimate, not an audited valuation.
 - No investment advice is provided.
 - Codal report discovery and detail fetching are best-effort. The extension may detect table metadata and limited monthly portfolio suggestions, but it does not calculate NAV from Codal automatically.
 - Codal discovery may fail because of endpoint changes, browser/network blocking, rate limits, or unexpected response shapes.
+- Codal discovery failure is different from a successful `not found` result. On network, VPN, filtering, CORS, or temporary service failures, the UI should say the connection/check failed instead of showing report slots as `یافت نشد`.
+- If a previous successful Codal discovery exists for the symbol, the extension may show it as stale cached data. Stale Codal suggestions are downgraded for manual review and are never auto-applied.
+- Failed live Codal responses must not overwrite the last successful cached discovery or any manual/applied NAV inputs.
 - Codal requests run through the extension background service worker. If the service worker is unavailable, asleep, or missing host permissions, the UI shows a safe warning and the manual calculator remains usable.
 - Invalid detected symbols such as `TSETMC`, `InsCode:*`, `نماد نامشخص`, URLs, domains, or numeric-only values are intentionally not searched in Codal.
 - A discovered Codal report link or title should be treated as a convenience reference, not a verified data source.

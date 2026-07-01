@@ -212,7 +212,11 @@ describe('Codal background bridge', () => {
 
     expect(response).toEqual({
       ok: false,
-      errorMessage: 'failed fetch'
+      status: 'network-error',
+      errorMessage: 'failed fetch',
+      attemptCount: undefined,
+      domain: 'codal.ir',
+      usedCache: false
     });
   });
 });

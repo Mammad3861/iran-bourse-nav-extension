@@ -59,7 +59,12 @@ export type CodalRuntimeResponse<T extends CodalMessageType = CodalMessageType> 
     }
   | {
       ok: false;
+      status?: 'network-error' | 'cors-blocked' | 'unavailable' | 'parse-error';
       errorMessage: string;
+      attemptCount?: number;
+      domain?: string;
+      usedCache?: boolean;
+      cachedAt?: string;
     };
 
 export function isCodalRuntimeMessage(message: unknown): message is CodalRuntimeMessage {

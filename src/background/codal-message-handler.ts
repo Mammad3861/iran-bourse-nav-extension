@@ -58,6 +58,20 @@ function requestKey(message: CodalRuntimeMessage): string {
   return `${message.type}:${message.report.url ?? message.report.tracingNo ?? message.report.reportId ?? message.report.title}`;
 }
 
+function responseStatusForError(error: unknown): 'network-error' | 'cors-blocked' | 'unavailable' | 'parse-error' {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/CORS|Access-Control-Allow-Origin|blocked by CORS/i.test(message)) return 'cors-blocked';
+  if (/timed out|timeout/i.test(message)) return 'unavailable';
+  if (/JSON|parse|Unexpected token/i.test(message)) return 'parse-error';
+  return 'network-error';
+}
+
+function responseAttemptCount(error: unknown): number | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/after\s+(\d+)\s+attempt/i);
+  return match ? Number(match[1]) : undefined;
+}
+
 async function runRequest(
   message: CodalRuntimeMessage,
   dependencies: CodalMessageHandlerDependencies
@@ -94,7 +108,11 @@ async function runRequest(
   } catch (error) {
     return {
       ok: false,
-      errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در ارتباط با کدال'
+      status: responseStatusForError(error),
+      errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در ارتباط با کدال',
+      attemptCount: responseAttemptCount(error),
+      domain: 'codal.ir',
+      usedCache: false
     };
   }
 }

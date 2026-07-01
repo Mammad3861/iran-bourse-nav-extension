@@ -159,6 +159,51 @@ function reportSummary(report: CodalReportReference | undefined): string {
   return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
 }
 
+function discoveryUnavailableReportText(result: CodalReportDiscoveryResult): string {
+  if (result.status === 'stale-cache') return 'نمایش از داده ذخیره‌شده قدیمی';
+  if (result.status === 'not-found') return 'یافت نشد';
+  return 'به‌دلیل خطای اتصال بررسی نشد';
+}
+
+function monthlySummaryForDiscovery(result: CodalReportDiscoveryResult): string {
+  return result.monthlyActivityReport ? reportSummary(result.monthlyActivityReport) : discoveryUnavailableReportText(result);
+}
+
+function financialSummaryForDiscovery(result: CodalReportDiscoveryResult): string {
+  if (result.financialStatementReport) return financialReportSummary(result.financialStatementReport);
+  if (result.status === 'not-found') return financialReportSummary(undefined);
+  return discoveryUnavailableReportText(result);
+}
+
+function discoveryStatusText(result: CodalReportDiscoveryResult): string {
+  if (result.status === 'found') {
+    return `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
+      sharedDiscoverySelectionNotice(result) ? ` - ${sharedDiscoverySelectionNotice(result)}` : ''
+    }`;
+  }
+  if (result.status === 'not-found') {
+    return result.errorMessage ?? sharedDiscoverySelectionNotice(result) ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد';
+  }
+  if (result.status === 'stale-cache') {
+    return [
+      'داده کدال قدیمی / stale نمایش داده می‌شود.',
+      result.cachedAt ? `زمان ذخیره: ${formatPersianTimestamp(new Date(result.cachedAt))}.` : undefined,
+      result.errorMessage
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  return [
+    'کدال در حال حاضر قابل دریافت نیست؛ اتصال، VPN یا دسترسی افزونه را بررسی کنید.',
+    result.attemptCount ? `تعداد تلاش: ${result.attemptCount}.` : undefined,
+    result.errorMessage,
+    'داده ذخیره‌شده‌ای برای این نماد وجود ندارد.'
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 function renderDiscoveryDiagnostics(root: HTMLElement, result: CodalReportDiscoveryResult): void {
   const container = root.querySelector<HTMLElement>('[data-ibnav-codal="diagnostics"]');
   if (!container) return;
@@ -259,26 +304,19 @@ function renderCodalDiscovery(root: HTMLElement, result: CodalReportDiscoveryRes
   const status = root.querySelector('[data-ibnav-codal="status"]');
   const monthly = root.querySelector('[data-ibnav-codal="monthly"]');
   const financial = root.querySelector('[data-ibnav-codal="financial"]');
+  const retry = root.querySelector<HTMLButtonElement>('[data-ibnav-codal="retry"]');
 
   if (!status || !monthly || !financial) {
     return;
   }
 
-  if (result.status === 'found') {
-    status.textContent = `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
-      sharedDiscoverySelectionNotice(result) ? ` - ${sharedDiscoverySelectionNotice(result)}` : ''
-    }`;
-  } else if (result.status === 'not-found') {
-    status.textContent =
-      result.errorMessage ??
-      sharedDiscoverySelectionNotice(result) ??
-      'برای این نماد گزارش قابل اتکایی پیدا نشد';
-  } else {
-    status.textContent = `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`;
+  status.textContent = discoveryStatusText(result);
+  if (retry) {
+    retry.hidden = result.status === 'found' || result.status === 'not-found';
   }
 
-  monthly.textContent = reportSummary(result.monthlyActivityReport);
-  financial.textContent = financialReportSummary(result.financialStatementReport);
+  monthly.textContent = monthlySummaryForDiscovery(result);
+  financial.textContent = financialSummaryForDiscovery(result);
   updateReportLink(root, '[data-ibnav-codal-link="monthly"]', result.monthlyActivityReport);
   updateReportLink(root, '[data-ibnav-codal-link="financial"]', result.financialStatementReport);
   renderDiscoveryDiagnostics(root, result);
@@ -396,6 +434,31 @@ function tsetmcTotalSharesParseResult(value: number, options: NavWidgetOptions):
     },
     warnings: ['تعداد کل سهام از TSETMC پیشنهاد شده است و به‌تنهایی NAV را کامل نمی‌کند.'],
     parsedAt
+  };
+}
+
+function markParseResultStale(result: MonthlyActivityParseResult, cachedAt?: string): MonthlyActivityParseResult {
+  const staleWarning = cachedAt
+    ? `این پیشنهاد از داده ذخیره‌شده قدیمی کدال است (${formatPersianTimestamp(new Date(cachedAt))}) و نیازمند بررسی دستی است.`
+    : 'این پیشنهاد از داده ذخیره‌شده قدیمی کدال است و نیازمند بررسی دستی است.';
+  const markValue = (value: ExtractedPortfolioValue): ExtractedPortfolioValue => ({
+    ...value,
+    confidence: 'low',
+    warning: value.warning ? `${value.warning} ${staleWarning}` : staleWarning
+  });
+  return {
+    ...result,
+    status: 'ambiguous',
+    extractedValues: result.extractedValues.map(markValue),
+    primarySuggestions: result.primarySuggestions.map(markValue),
+    secondarySuggestions: result.secondarySuggestions.map(markValue),
+    warnings: [...new Set([...result.warnings, staleWarning])],
+    diagnostics: {
+      ...result.diagnostics,
+      parserStatus: 'ambiguous',
+      parserWarnings: [...new Set([...result.diagnostics.parserWarnings, staleWarning])],
+      extractedCandidates: result.diagnostics.extractedCandidates.map(markValue)
+    }
   };
 }
 
@@ -893,6 +956,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       <section class="ibnav-codal" aria-live="polite">
         <h3 class="ibnav-subtitle">گزارش‌های کدال</h3>
         <p class="ibnav-muted" data-ibnav-codal="status">ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود</p>
+        <button type="button" class="ibnav-save ibnav-secondary" data-ibnav-codal="retry" hidden>تلاش دوباره برای دریافت کدال</button>
         <div class="ibnav-row"><span>فعالیت ماهانه</span><span data-ibnav-codal="monthly">-</span></div>
         <a class="ibnav-link" data-ibnav-codal-link="monthly" target="_blank" rel="noreferrer" hidden>مشاهده گزارش فعالیت ماهانه</a>
         <div class="ibnav-row"><span>صورت مالی</span><span data-ibnav-codal="financial">-</span></div>
@@ -921,86 +985,94 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   updateResults(root, updatedAt);
   updateResetCodalButton(root, activeRecord);
   const codalSymbolValidation = validateCodalSearchSymbol(options.codalSymbol ?? options.symbol);
-  if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
-    renderCodalDiscovery(root, {
-      status: 'not-found',
-      symbol: options.symbol,
-      errorMessage: codalSymbolValidation.reason,
-      sourceVerified: false,
-      checkedAt: new Date().toISOString()
-    });
-    renderCodalDetail(root, {
-      status: 'unavailable',
-      errorMessage: codalSymbolValidation.reason
-    });
-  } else {
-    requestCodalDiscovery(codalSymbolValidation.symbol, options.instrumentName)
-      .then(async (result) => {
+  const loadCodalDiscovery = async (): Promise<void> => {
+    if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
+      renderCodalDiscovery(root, {
+        status: 'not-found',
+        symbol: options.symbol,
+        errorMessage: codalSymbolValidation.reason,
+        sourceVerified: false,
+        checkedAt: new Date().toISOString()
+      });
+      renderCodalDetail(root, {
+        status: 'unavailable',
+        errorMessage: codalSymbolValidation.reason
+      });
+      return;
+    }
+
+    try {
+      const result = await requestCodalDiscovery(codalSymbolValidation.symbol, options.instrumentName);
+      if (!isActiveWidgetRender(root, renderId)) return;
+      renderCodalDiscovery(root, result);
+      const reports = [result.monthlyActivityReport, result.financialStatementReport].filter(
+        (report): report is CodalReportReference => Boolean(report)
+      );
+      if (reports.length === 0) {
+        renderCodalDetail(root, {
+          status: result.status === 'network-error' || result.status === 'cors-blocked' || result.status === 'parse-error' ? 'network-error' : 'unavailable',
+          errorMessage: result.errorMessage
+        });
+        return;
+      }
+
+      const parseResults: MonthlyActivityParseResult[] = [];
+      let renderedDetail = false;
+      const uniqueReports = reports.filter(
+        (report, index, all) =>
+          all.findIndex((candidate) => (candidate.url ?? candidate.tracingNo ?? candidate.title) === (report.url ?? report.tracingNo ?? report.title)) === index
+      );
+      for (const report of uniqueReports) {
+        const detailResult = await requestCodalReportDetail(report);
         if (!isActiveWidgetRender(root, renderId)) return;
-        renderCodalDiscovery(root, result);
-        const reports = [result.monthlyActivityReport, result.financialStatementReport].filter(
-          (report): report is CodalReportReference => Boolean(report)
-        );
-        if (reports.length === 0) {
-          renderCodalDetail(root, {
-            status: result.status === 'failed' ? 'network-error' : 'unavailable',
-            errorMessage: result.errorMessage
-          });
-          return;
+        if (!renderedDetail) {
+          renderCodalDetail(root, detailResult);
+          renderedDetail = true;
         }
-
-        const parseResults: MonthlyActivityParseResult[] = [];
-        let renderedDetail = false;
-        const uniqueReports = reports.filter(
-          (report, index, all) =>
-            all.findIndex((candidate) => (candidate.url ?? candidate.tracingNo ?? candidate.title) === (report.url ?? report.tracingNo ?? report.title)) === index
-        );
-        for (const report of uniqueReports) {
-          const detailResult = await requestCodalReportDetail(report);
-          if (!isActiveWidgetRender(root, renderId)) return;
-          if (!renderedDetail) {
-            renderCodalDetail(root, detailResult);
-            renderedDetail = true;
-          }
-          if (detailResult.detail) {
-            parseResults.push(
-              report === result.financialStatementReport
-                ? parseFinancialStatementReport(detailResult.detail)
-                : parseMonthlyActivityReport(detailResult.detail)
-            );
-          }
+        if (detailResult.detail) {
+          parseResults.push(
+            report === result.financialStatementReport
+              ? parseFinancialStatementReport(detailResult.detail)
+              : parseMonthlyActivityReport(detailResult.detail)
+          );
         }
+      }
 
-        if (parseResults.length > 0) {
-          if (
-            options.totalShares !== undefined &&
-            options.totalShares > 0 &&
-            !parseResults.some((parseResult) =>
-              parseResult.extractedValues.some((value) => value.kind === 'totalSharesSuggestion')
-            )
-          ) {
-            parseResults.push(tsetmcTotalSharesParseResult(options.totalShares, options));
-          }
-          renderMonthlySuggestions(root, mergeMonthlyActivityParseResults(parseResults), options, () => activeRecord, (record) => {
+      if (parseResults.length > 0) {
+        if (
+          options.totalShares !== undefined &&
+          options.totalShares > 0 &&
+          !parseResults.some((parseResult) =>
+            parseResult.extractedValues.some((value) => value.kind === 'totalSharesSuggestion')
+          )
+        ) {
+          parseResults.push(tsetmcTotalSharesParseResult(options.totalShares, options));
+        }
+          const mergedResult = mergeMonthlyActivityParseResults(parseResults);
+          renderMonthlySuggestions(root, result.status === 'stale-cache' ? markParseResultStale(mergedResult, result.cachedAt) : mergedResult, options, () => activeRecord, (record) => {
             activeRecord = record;
           });
-        }
-      })
-      .catch((error: unknown) => {
-        if (!isActiveWidgetRender(root, renderId)) return;
-        renderCodalDiscovery(root, {
-          status: 'failed',
-          symbol: options.symbol,
-          errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
-          sourceVerified: false,
-          checkedAt: new Date().toISOString()
-        });
-        renderCodalDetail(root, {
-          status: 'network-error',
-          errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت جزئیات کدال'
-        });
+      }
+    } catch (error: unknown) {
+      if (!isActiveWidgetRender(root, renderId)) return;
+      renderCodalDiscovery(root, {
+        status: 'network-error',
+        symbol: options.symbol,
+        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
+        sourceVerified: false,
+        checkedAt: new Date().toISOString()
       });
-  }
+      renderCodalDetail(root, {
+        status: 'network-error',
+        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت جزئیات کدال'
+      });
+    }
+  };
+
+  root.querySelector<HTMLButtonElement>('[data-ibnav-codal="retry"]')?.addEventListener('click', () => {
+    void loadCodalDiscovery();
+  });
+  void loadCodalDiscovery();
 
   root.querySelectorAll<HTMLInputElement>('.ibnav-input').forEach((input) => {
     input.addEventListener('input', () => {

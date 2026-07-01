@@ -108,6 +108,7 @@ Limited public smoke testing on 2026-06-28 verified that:
 * The widget now shows a calculation status badge and warnings when NAV is incomplete, including cost-only Codal suggestions that would otherwise produce a misleading negative NAV.
 * Incomplete NAV is not shown as a final numeric estimate; NAV total, NAV/share, and P/NAV remain unavailable until required fields are provided.
 * Codal resources can load differently depending on network routing or VPN state; failures should remain visible in diagnostics and leave the manual calculator usable.
+* If live Codal discovery fails, the extension distinguishes connection errors from true `not found` results. When a previous successful discovery exists, it may show stale cached Codal metadata with a clear stale warning; cached suggestions still require manual review and are never auto-applied.
 * Chrome automation could not open `chrome://extensions/`, so final unpacked-extension loading from `dist/` must be checked manually in Chrome.
 
 ## Development

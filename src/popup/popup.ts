@@ -45,6 +45,51 @@ function reportSummary(report: CodalReportReference | undefined): string {
   return report.publishedAt ? `${report.title} - ${report.publishedAt}` : report.title;
 }
 
+function discoveryUnavailableReportText(result: CodalReportDiscoveryResult): string {
+  if (result.status === 'stale-cache') return 'نمایش از داده ذخیره‌شده قدیمی';
+  if (result.status === 'not-found') return 'یافت نشد';
+  return 'به‌دلیل خطای اتصال بررسی نشد';
+}
+
+function monthlySummaryForDiscovery(result: CodalReportDiscoveryResult): string {
+  return result.monthlyActivityReport ? reportSummary(result.monthlyActivityReport) : discoveryUnavailableReportText(result);
+}
+
+function financialSummaryForDiscovery(result: CodalReportDiscoveryResult): string {
+  if (result.financialStatementReport) return financialReportSummary(result.financialStatementReport);
+  if (result.status === 'not-found') return financialReportSummary(undefined);
+  return discoveryUnavailableReportText(result);
+}
+
+function discoveryStatusText(result: CodalReportDiscoveryResult): string {
+  if (result.status === 'found') {
+    return `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
+      sharedDiscoverySelectionNotice(result) ? ` - ${sharedDiscoverySelectionNotice(result)}` : ''
+    }`;
+  }
+  if (result.status === 'not-found') {
+    return result.errorMessage ?? sharedDiscoverySelectionNotice(result) ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد';
+  }
+  if (result.status === 'stale-cache') {
+    return [
+      'داده کدال قدیمی / stale نمایش داده می‌شود.',
+      result.cachedAt ? `زمان ذخیره: ${formatPersianTimestamp(new Date(result.cachedAt))}.` : undefined,
+      result.errorMessage
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  return [
+    'کدال در حال حاضر قابل دریافت نیست؛ اتصال، VPN یا دسترسی افزونه را بررسی کنید.',
+    result.attemptCount ? `تعداد تلاش: ${result.attemptCount}.` : undefined,
+    result.errorMessage,
+    'داده ذخیره‌شده‌ای برای این نماد وجود ندارد.'
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 function updateReportLink(selector: string, report: CodalReportReference | undefined): void {
   const link = document.querySelector<HTMLAnchorElement>(selector);
   if (!link) {
@@ -125,24 +170,9 @@ function renderDiscoveryDiagnostics(result: CodalReportDiscoveryResult): void {
 }
 
 function renderCodalDiscovery(result: CodalReportDiscoveryResult): void {
-  if (result.status === 'found') {
-    setText(
-      '[data-popup-codal="status"]',
-      `ارتباط با کدال از پس‌زمینه افزونه انجام می‌شود؛ گزارش‌های مرتبط پیدا شد${
-        sharedDiscoverySelectionNotice(result) ? ` - ${sharedDiscoverySelectionNotice(result)}` : ''
-      }`
-    );
-  } else if (result.status === 'not-found') {
-    setText(
-      '[data-popup-codal="status"]',
-      result.errorMessage ?? sharedDiscoverySelectionNotice(result) ?? 'برای این نماد گزارش قابل اتکایی پیدا نشد'
-    );
-  } else {
-    setText('[data-popup-codal="status"]', `خطا در دریافت کدال از پس‌زمینه افزونه: ${result.errorMessage ?? 'نامشخص'}`);
-  }
-
-  setText('[data-popup-codal="monthly"]', reportSummary(result.monthlyActivityReport));
-  setText('[data-popup-codal="financial"]', financialReportSummary(result.financialStatementReport));
+  setText('[data-popup-codal="status"]', discoveryStatusText(result));
+  setText('[data-popup-codal="monthly"]', monthlySummaryForDiscovery(result));
+  setText('[data-popup-codal="financial"]', financialSummaryForDiscovery(result));
   updateReportLink('[data-popup-codal-link="monthly"]', result.monthlyActivityReport);
   updateReportLink('[data-popup-codal-link="financial"]', result.financialStatementReport);
   renderDiscoveryDiagnostics(result);
@@ -191,6 +221,31 @@ function suggestionText(value: ExtractedPortfolioValue): string {
       ? ` | خام: ${value.rawText} | مقدار مقیاس‌گذاری‌شده: ${formatNumberFa(value.value)}`
       : '';
   return `${value.label}: ${formatNumberFa(value.value)} (${confidence}، جدول ${value.sourceTableIndex}${unit}${scaled})`;
+}
+
+function markParseResultStale(result: MonthlyActivityParseResult, cachedAt?: string): MonthlyActivityParseResult {
+  const staleWarning = cachedAt
+    ? `این پیشنهاد از داده ذخیره‌شده قدیمی کدال است (${formatPersianTimestamp(new Date(cachedAt))}) و نیازمند بررسی دستی است.`
+    : 'این پیشنهاد از داده ذخیره‌شده قدیمی کدال است و نیازمند بررسی دستی است.';
+  const markValue = (value: ExtractedPortfolioValue): ExtractedPortfolioValue => ({
+    ...value,
+    confidence: 'low',
+    warning: value.warning ? `${value.warning} ${staleWarning}` : staleWarning
+  });
+  return {
+    ...result,
+    status: 'ambiguous',
+    extractedValues: result.extractedValues.map(markValue),
+    primarySuggestions: result.primarySuggestions.map(markValue),
+    secondarySuggestions: result.secondarySuggestions.map(markValue),
+    warnings: [...new Set([...result.warnings, staleWarning])],
+    diagnostics: {
+      ...result.diagnostics,
+      parserStatus: 'ambiguous',
+      parserWarnings: [...new Set([...result.diagnostics.parserWarnings, staleWarning])],
+      extractedCandidates: result.diagnostics.extractedCandidates.map(markValue)
+    }
+  };
 }
 
 function diagnosticsTableFor(
@@ -502,7 +557,10 @@ async function renderPopup(): Promise<void> {
   );
   if (reports.length === 0) {
     renderCodalDetail({
-      status: codalResult.status === 'failed' ? 'network-error' : 'unavailable',
+      status:
+        codalResult.status === 'network-error' || codalResult.status === 'cors-blocked' || codalResult.status === 'parse-error'
+          ? 'network-error'
+          : 'unavailable',
       errorMessage: codalResult.errorMessage
     });
     return;
@@ -530,7 +588,8 @@ async function renderPopup(): Promise<void> {
   }
 
   if (parseResults.length > 0) {
-    renderMonthlySuggestions(mergeMonthlyActivityParseResults(parseResults));
+    const mergedResult = mergeMonthlyActivityParseResults(parseResults);
+    renderMonthlySuggestions(codalResult.status === 'stale-cache' ? markParseResultStale(mergedResult, codalResult.cachedAt) : mergedResult);
   }
 }
 

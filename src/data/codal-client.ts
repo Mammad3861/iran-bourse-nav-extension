@@ -2,7 +2,15 @@ import { normalizePersianArabicDigits } from '../core/number-utils';
 import { getLocalValue, setLocalValue } from './cache-store';
 
 export type CodalReportKind = 'monthly-activity' | 'financial-statement' | 'unknown';
-export type CodalDiscoveryStatus = 'found' | 'not-found' | 'failed';
+export type CodalDiscoveryStatus =
+  | 'found'
+  | 'not-found'
+  | 'network-error'
+  | 'cors-blocked'
+  | 'unavailable'
+  | 'stale-cache'
+  | 'parse-error'
+  | 'failed';
 export type CodalReportDetailStatus =
   | 'fetched'
   | 'unavailable'
@@ -48,6 +56,14 @@ export interface CodalDiscoveryDiagnostics {
   requestedIssuerName?: string;
   monthlyActivity?: CodalReportSelectionDiagnostics;
   financialStatement?: CodalReportSelectionDiagnostics;
+  liveFetch?: {
+    status: CodalDiscoveryStatus;
+    errorMessage?: string;
+    attemptCount?: number;
+    domain?: string;
+    usedCache: boolean;
+    cachedAt?: string;
+  };
 }
 
 export interface CodalReportDiscoveryResult {
@@ -57,6 +73,12 @@ export interface CodalReportDiscoveryResult {
   financialStatementReport?: CodalReportReference;
   diagnostics?: CodalDiscoveryDiagnostics;
   errorMessage?: string;
+  errorStatus?: CodalDiscoveryStatus;
+  attemptCount?: number;
+  domain?: string;
+  usedCache?: boolean;
+  cachedAt?: string;
+  stale?: boolean;
   sourceVerified: false;
   checkedAt: string;
 }
@@ -165,6 +187,11 @@ interface CodalDetailCacheRecord {
   result: CodalReportDetailResult;
 }
 
+interface CodalDiscoveryCacheRecord {
+  createdAt: string;
+  result: CodalReportDiscoveryResult;
+}
+
 const CODAL_SEARCH_ENDPOINT = 'https://search.codal.ir/api/search/v2/q';
 const CODAL_ORIGIN = 'https://www.codal.ir';
 const DEFAULT_LIMIT = 20;
@@ -193,6 +220,10 @@ function codalCacheKey(symbol: string, kind: CodalReportKind | 'all'): string {
 
 function codalDetailCacheKey(key: string): string {
   return `codal-detail:${key}`;
+}
+
+function codalDiscoveryCacheKey(symbol: string): string {
+  return `codal-discovery:last-success:${symbol}`;
 }
 
 async function getCachedReports(
@@ -240,6 +271,26 @@ async function setCachedDetail(key: string, result: CodalReportDetailResult): Pr
     createdAt: new Date().toISOString(),
     result
   } satisfies CodalDetailCacheRecord);
+}
+
+async function getCachedDiscovery(symbol: string): Promise<CodalDiscoveryCacheRecord | undefined> {
+  return getLocalValue<CodalDiscoveryCacheRecord>(codalDiscoveryCacheKey(symbol));
+}
+
+async function setCachedDiscovery(symbol: string, result: CodalReportDiscoveryResult): Promise<void> {
+  if (result.status !== 'found' && result.status !== 'not-found') {
+    return;
+  }
+  const createdAt = new Date().toISOString();
+  await setLocalValue(codalDiscoveryCacheKey(symbol), {
+    createdAt,
+    result: {
+      ...result,
+      usedCache: false,
+      stale: false,
+      cachedAt: createdAt
+    }
+  } satisfies CodalDiscoveryCacheRecord);
 }
 
 function buildSearchUrl(symbol: string, limit: number): string {
@@ -438,6 +489,34 @@ async function fetchWithRetry(
   throw new Error(`Codal search failed after ${options.retryLimit + 1} attempt(s): ${message}`, {
     cause: lastError
   });
+}
+
+function discoveryErrorStatus(error: unknown): CodalDiscoveryStatus {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/CORS|Access-Control-Allow-Origin|blocked by CORS/i.test(message)) return 'cors-blocked';
+  if (/timed out|timeout/i.test(message)) return 'unavailable';
+  if (/JSON|parse|Unexpected token/i.test(message)) return 'parse-error';
+  if (/Failed to fetch|NetworkError|fetch/i.test(message)) return 'network-error';
+  return 'network-error';
+}
+
+function discoveryAttemptCount(error: unknown, retryLimit: number): number {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/after\s+(\d+)\s+attempt/i);
+  return match ? Number(match[1]) : retryLimit + 1;
+}
+
+function discoveryFailureMessage(status: CodalDiscoveryStatus): string {
+  if (status === 'cors-blocked') {
+    return 'کدال به‌دلیل محدودیت CORS/دسترسی افزونه قابل دریافت نیست؛ اتصال، VPN یا دسترسی افزونه را بررسی کنید.';
+  }
+  if (status === 'parse-error') {
+    return 'پاسخ کدال دریافت شد اما ساختار آن قابل پردازش نبود.';
+  }
+  if (status === 'unavailable') {
+    return 'کدال در حال حاضر در دسترس نیست؛ اتصال، VPN یا دسترسی افزونه را بررسی کنید.';
+  }
+  return 'کدال در حال حاضر قابل دریافت نیست؛ اتصال، VPN یا دسترسی افزونه را بررسی کنید.';
 }
 
 function sortReportsNewestFirst(reports: CodalReportReference[]): CodalReportReference[] {
@@ -1675,10 +1754,15 @@ export async function discoverLatestCodalReports(
       requestedSymbol: normalizedSymbol,
       requestedIssuerName: options.requestedIssuerName,
       monthlyActivity: monthlyDiagnostics,
-      financialStatement: financialDiagnostics
+      financialStatement: financialDiagnostics,
+      liveFetch: {
+        status: 'found',
+        domain: 'search.codal.ir',
+        usedCache: false
+      }
     };
 
-    return {
+    const result: CodalReportDiscoveryResult = {
       status: monthlyActivityReport || financialStatementReport ? 'found' : 'not-found',
       symbol: normalizedSymbol,
       monthlyActivityReport,
@@ -1691,11 +1775,62 @@ export async function discoverLatestCodalReports(
       sourceVerified: false,
       checkedAt
     };
+    result.diagnostics!.liveFetch!.status = result.status;
+    await setCachedDiscovery(normalizedSymbol, result);
+    return result;
   } catch (error) {
+    const status = discoveryErrorStatus(error);
+    const attemptCount = discoveryAttemptCount(error, options.retryLimit ?? DEFAULT_RETRY_LIMIT);
+    const errorMessage = error instanceof Error ? error.message : 'Codal discovery failed.';
+    const cached = await getCachedDiscovery(normalizedSymbol);
+    if (cached?.result) {
+      return {
+        ...cached.result,
+        status: 'stale-cache',
+        checkedAt,
+        errorStatus: status,
+        errorMessage,
+        attemptCount,
+        domain: 'search.codal.ir',
+        usedCache: true,
+        stale: true,
+        cachedAt: cached.createdAt,
+        diagnostics: {
+          ...(cached.result.diagnostics ?? {
+            requestedSymbol: normalizedSymbol,
+            requestedIssuerName: options.requestedIssuerName
+          }),
+          liveFetch: {
+            status,
+            errorMessage,
+            attemptCount,
+            domain: 'search.codal.ir',
+            usedCache: true,
+            cachedAt: cached.createdAt
+          }
+        }
+      };
+    }
+
     return {
-      status: 'failed',
+      status,
       symbol: normalizedSymbol,
-      errorMessage: error instanceof Error ? error.message : 'Codal discovery failed.',
+      errorStatus: status,
+      errorMessage: `${discoveryFailureMessage(status)} ${errorMessage}`,
+      attemptCount,
+      domain: 'search.codal.ir',
+      usedCache: false,
+      diagnostics: {
+        requestedSymbol: normalizedSymbol,
+        requestedIssuerName: options.requestedIssuerName,
+        liveFetch: {
+          status,
+          errorMessage,
+          attemptCount,
+          domain: 'search.codal.ir',
+          usedCache: false
+        }
+      },
       sourceVerified: false,
       checkedAt
     };

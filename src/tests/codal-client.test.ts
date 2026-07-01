@@ -530,7 +530,7 @@ describe('codal-client', () => {
     expect(result.financialStatementReport).toBeUndefined();
   });
 
-  it('returns failed when Codal discovery cannot fetch reports', async () => {
+  it('returns network-error when Codal discovery cannot fetch reports and no stale cache exists', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: 'unavailable' }, 503));
@@ -540,8 +540,64 @@ describe('codal-client', () => {
       fetchImpl: fetchMock as unknown as typeof fetch
     });
 
-    expect(result.status).toBe('failed');
+    expect(result.status).toBe('network-error');
     expect(result.errorMessage).toContain('HTTP 503');
+    expect(result.usedCache).toBe(false);
+    expect(result.attemptCount).toBe(1);
+    expect(result.monthlyActivityReport).toBeUndefined();
+    expect(result.diagnostics?.liveFetch).toEqual(
+      expect.objectContaining({
+        status: 'network-error',
+        usedCache: false,
+        attemptCount: 1,
+        domain: 'search.codal.ir'
+      })
+    );
+  });
+
+  it('returns stale-cache from the last successful discovery when live Codal search fails', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const successFetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'وغدیر',
+            CompanyName: 'سرمایه گذاری غدیر',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+            PublishDateTime: '2026-06-20T00:00:00Z',
+            Url: '/Reports/Decision.aspx?LetterSerial=ok'
+          }
+        ]
+      })
+    );
+
+    const first = await discoverLatestCodalReports('وغدیر', {
+      fetchImpl: successFetch as unknown as typeof fetch
+    });
+    expect(first.status).toBe('found');
+
+    const failedFetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const second = await discoverLatestCodalReports('وغدیر', {
+      retryLimit: 0,
+      cacheTtlMs: -1,
+      fetchImpl: failedFetch as unknown as typeof fetch
+    });
+
+    expect(second.status).toBe('stale-cache');
+    expect(second.monthlyActivityReport?.title).toContain('گزارش فعالیت ماهانه');
+    expect(second.errorMessage).toContain('Failed to fetch');
+    expect(second.usedCache).toBe(true);
+    expect(second.stale).toBe(true);
+    expect(second.cachedAt).toBeDefined();
+    expect(second.diagnostics?.liveFetch).toEqual(
+      expect.objectContaining({
+        status: 'network-error',
+        usedCache: true,
+        attemptCount: 1,
+        domain: 'search.codal.ir'
+      })
+    );
   });
 
   it('does not call Codal for unknown or InsCode-only symbols', async () => {
