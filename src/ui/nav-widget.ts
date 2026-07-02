@@ -20,8 +20,11 @@ import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-t
 import { manualReviewMarketValueSummary } from '../data/market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from '../data/manual-overrides';
 import { manualFieldMetadata, normalizeManualOverrideRecord } from '../data/manual-overrides';
+import { buildNavCompletionSummary, navCompletionFieldLabels } from '../data/nav-completion';
 import {
   applySuggestionToRecord,
+  confirmZeroField,
+  markSuggestionFieldReviewed,
   markFieldAsManual,
   resetCodalSuggestionFields,
   suggestionTarget
@@ -785,6 +788,7 @@ function appendManualReviewMarketCandidates(
         applyRecordInputsToForm(root, saved);
         setRecord(saved);
         updateResetCodalButton(root, saved);
+        updateCompletionWorkflow(root, options, getRecord, setRecord, result);
         button.disabled = true;
         button.textContent = 'اعمال‌شده';
         setApplyStatus(root, appliedSuggestionMessage('listedPortfolioMarketValue', 'codal-excel-manual-review'));
@@ -905,6 +909,122 @@ function updateFieldSourceBadges(root: HTMLElement, record: ManualOverrideRecord
   }
 }
 
+function updateCompletionWorkflow(
+  root: HTMLElement,
+  options: NavWidgetOptions,
+  getRecord: () => ManualOverrideRecord | undefined,
+  setRecord: (record: ManualOverrideRecord) => void,
+  latestParseResult?: MonthlyActivityParseResult
+): void {
+  const container = root.querySelector<HTMLElement>('[data-ibnav-completion]');
+  if (!container) return;
+
+  const record = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
+  const summary = buildNavCompletionSummary(record, latestParseResult);
+  container.textContent = '';
+
+  const header = document.createElement('div');
+  header.className = 'ibnav-row';
+  const title = document.createElement('strong');
+  title.textContent = 'مسیر تکمیل NAV';
+  const badge = document.createElement('span');
+  badge.className = 'ibnav-status-badge';
+  badge.dataset.state = summary.status === 'incomplete' ? 'incomplete' : summary.status === 'complete-reviewed' ? 'complete' : 'needs-review';
+  badge.textContent = summary.statusLabel;
+  header.append(title, badge);
+  container.appendChild(header);
+
+  const summaryText = document.createElement('p');
+  summaryText.className = 'ibnav-muted';
+  summaryText.textContent = [
+    summary.summaryText,
+    summary.navShareMissingFields.length
+      ? `برای NAV هر سهم و P/NAV، ${summary.navShareMissingFields.map((field) => navCompletionFieldLabels[field]).join('، ')} هم باید وارد شده باشد.`
+      : 'NAV هر سهم و P/NAV با ورودی‌های فعلی قابل بررسی است.'
+  ].join(' ');
+  container.appendChild(summaryText);
+
+  if (summary.navTotalMissingFields.length) {
+    const missing = document.createElement('p');
+    missing.className = 'ibnav-warning';
+    missing.textContent = `فیلدهای واردنشده: ${summary.navTotalMissingFields.map((field) => navCompletionFieldLabels[field]).join('، ')}.`;
+    container.appendChild(missing);
+  }
+
+  for (const warning of summary.pairWarnings) {
+    const item = document.createElement('p');
+    item.className = 'ibnav-warning';
+    item.textContent = warning;
+    container.appendChild(item);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'ibnav-completion-list';
+  for (const field of summary.fields) {
+    const item = document.createElement('div');
+    item.className = 'ibnav-completion-item';
+    const row = document.createElement('div');
+    row.className = 'ibnav-row';
+    const label = document.createElement('span');
+    label.textContent = field.label;
+    const status = document.createElement('strong');
+    status.textContent = field.statusLabel;
+    row.append(label, status);
+    item.appendChild(row);
+
+    const guidance = document.createElement('p');
+    guidance.className = field.needsReview || !field.present ? 'ibnav-warning' : 'ibnav-muted';
+    guidance.textContent = field.guidance;
+    item.appendChild(guidance);
+
+    if (field.canConfirmZero) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ibnav-apply ibnav-secondary';
+      button.textContent = 'ثبت صفر با تأیید من';
+      button.addEventListener('click', async () => {
+        const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
+        const next = confirmZeroField(current, field.field);
+        try {
+          const saved = await persistAppliedRecord(root, next);
+          applyRecordInputsToForm(root, saved);
+          setRecord(saved);
+          updateResetCodalButton(root, saved);
+          updateCompletionWorkflow(root, options, getRecord, setRecord, latestParseResult);
+          setApplyStatus(root, `${field.label} با مقدار صفر و تأیید شما ذخیره شد.`);
+        } catch (error) {
+          setApplyStatus(root, applyFailureMessage(error), true);
+        }
+      });
+      item.appendChild(button);
+    }
+
+    if (field.canConfirmReview) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ibnav-apply ibnav-secondary';
+      button.textContent = 'تأیید بررسی دستی';
+      button.addEventListener('click', async () => {
+        const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
+        const next = markSuggestionFieldReviewed(current, field.field);
+        try {
+          const saved = await persistAppliedRecord(root, next);
+          setRecord(saved);
+          updateResetCodalButton(root, saved);
+          updateCompletionWorkflow(root, options, getRecord, setRecord, latestParseResult);
+          setApplyStatus(root, `${field.label} به‌عنوان بررسی‌شده علامت‌گذاری شد.`);
+        } catch (error) {
+          setApplyStatus(root, applyFailureMessage(error), true);
+        }
+      });
+      item.appendChild(button);
+    }
+
+    list.appendChild(item);
+  }
+  container.appendChild(list);
+}
+
 function renderMonthlySuggestions(
   root: HTMLElement,
   result: MonthlyActivityParseResult,
@@ -978,6 +1098,7 @@ function renderMonthlySuggestions(
       applyRecordInputsToForm(root, saved);
       setRecord(saved);
       updateResetCodalButton(root, saved);
+      updateCompletionWorkflow(root, options, getRecord, setRecord, result);
       setApplyStatus(root, 'همه موارد قابل اعتماد با تأیید شما اعمال و ذخیره شد.');
     } catch (error) {
       setApplyStatus(
@@ -1063,6 +1184,7 @@ function renderMonthlySuggestions(
           applyRecordInputsToForm(root, saved);
           setRecord(saved);
           updateResetCodalButton(root, saved);
+          updateCompletionWorkflow(root, options, getRecord, setRecord, result);
           button.disabled = true;
           button.textContent = 'اعمال‌شده';
           setApplyStatus(root, appliedSuggestionMessage(target, sourceKind));
@@ -1113,6 +1235,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
 
   let activeRecord = await getManualOverride(options.symbol);
   activeRecord = activeRecord ? normalizeManualOverrideRecord(activeRecord) : undefined;
+  let latestParseResult: MonthlyActivityParseResult | undefined;
   const inputs = activeRecord?.inputs ?? emptyNavInputs();
   inputs.currentPrice = inputs.currentPrice ?? options.currentPrice;
 
@@ -1154,6 +1277,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <div class="ibnav-row"><span>زمان داده</span><span data-ibnav-result="updatedAt">-</span></div>
         <p class="ibnav-warning" data-ibnav-result="warnings" hidden></p>
       </div>
+      <section class="ibnav-completion" data-ibnav-completion aria-live="polite"></section>
       <button type="button" class="ibnav-save">ذخیره برای این نماد</button>
       <button type="button" class="ibnav-save ibnav-secondary" data-ibnav-reset-codal hidden>پاک کردن مقادیر پیشنهادی اعمال‌شده</button>
       <section class="ibnav-codal" aria-live="polite">
@@ -1188,6 +1312,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   updateResults(root, updatedAt);
   updateResetCodalButton(root, activeRecord);
   updateFieldSourceBadges(root, activeRecord);
+  updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
+    activeRecord = record;
+  }, latestParseResult);
   const codalSymbolValidation = validateCodalSearchSymbol(options.codalSymbol ?? options.symbol);
   const loadCodalDiscovery = async (): Promise<void> => {
     if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
@@ -1253,9 +1380,13 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           parseResults.push(tsetmcTotalSharesParseResult(options.totalShares, options));
         }
           const mergedResult = mergeMonthlyActivityParseResults(parseResults);
-          renderMonthlySuggestions(root, result.status === 'stale-cache' ? markParseResultStale(mergedResult, result.cachedAt) : mergedResult, options, () => activeRecord, (record) => {
+          latestParseResult = result.status === 'stale-cache' ? markParseResultStale(mergedResult, result.cachedAt) : mergedResult;
+          renderMonthlySuggestions(root, latestParseResult, options, () => activeRecord, (record) => {
             activeRecord = record;
           });
+          updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
+            activeRecord = record;
+          }, latestParseResult);
       }
     } catch (error: unknown) {
       if (!isActiveWidgetRender(root, renderId)) return;
@@ -1294,6 +1425,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         setApplyStatus(root, 'ویرایش دستی ثبت شد؛ منبع این مقدار اکنون دستی است.');
       }
       updateResults(root, formatPersianTimestamp());
+      updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
+        activeRecord = record;
+      }, latestParseResult);
     });
   });
 
@@ -1311,6 +1445,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       updateResults(root, formatPersianTimestamp(new Date(record.updatedAt)));
       updateResetCodalButton(root, activeRecord);
       updateFieldSourceBadges(root, activeRecord);
+      updateCompletionWorkflow(root, options, () => activeRecord, (nextRecord) => {
+        activeRecord = nextRecord;
+      }, latestParseResult);
       setApplyStatus(root, 'ورودی‌های دستی ذخیره شد.');
     } catch (error) {
       setApplyStatus(
@@ -1337,6 +1474,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       updateResults(root, formatPersianTimestamp(new Date(next.updatedAt)));
       updateResetCodalButton(root, activeRecord);
       updateFieldSourceBadges(root, activeRecord);
+      updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
+        activeRecord = record;
+      }, latestParseResult);
       setApplyStatus(root, 'مقادیر پیشنهادی اعمال‌شده پاک شد؛ مقادیر دستی حفظ شد.');
     } catch (error) {
       setApplyStatus(

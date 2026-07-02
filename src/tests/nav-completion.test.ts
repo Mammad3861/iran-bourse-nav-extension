@@ -1,0 +1,218 @@
+import { describe, expect, it } from 'vitest';
+import type { ManualOverrideRecord } from '../data/manual-overrides';
+import { buildNavCompletionSummary } from '../data/nav-completion';
+import { confirmZeroField, markSuggestionFieldReviewed, resetCodalSuggestionFields } from '../data/suggestion-application';
+
+function record(overrides: Partial<ManualOverrideRecord> = {}): ManualOverrideRecord {
+  return {
+    symbol: 'وصندوق',
+    inputs: {},
+    currentPriceSource: 'manual',
+    updatedAt: '2026-07-02T00:00:00.000Z',
+    fieldSources: {},
+    ...overrides
+  };
+}
+
+describe('NAV completion workflow model', () => {
+  it('shows missing NAV total fields', () => {
+    const summary = buildNavCompletionSummary(record({ inputs: { listedPortfolioCostValue: 136_494_769 } }));
+
+    expect(summary.status).toBe('incomplete');
+    expect(summary.navTotalMissingFields).toEqual(
+      expect.arrayContaining(['equity', 'listedPortfolioMarketValue', 'unlistedPortfolioSurplus'])
+    );
+  });
+
+  it('treats manually entered fields as present', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: {
+          equity: 100,
+          listedPortfolioMarketValue: 500,
+          listedPortfolioCostValue: 400,
+          unlistedPortfolioSurplus: 0
+        },
+        fieldSources: {
+          listedPortfolioMarketValue: {
+            value: 500,
+            source: 'manual',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            touchedByUser: true
+          }
+        }
+      })
+    );
+
+    expect(summary.navTotalMissingFields).toEqual([]);
+    expect(summary.fields.find((field) => field.field === 'listedPortfolioMarketValue')?.statusLabel).toBe(
+      'وارد شده دستی'
+    );
+  });
+
+  it('marks suggestion-applied fields as present but needing review', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: {
+          equity: 100,
+          listedPortfolioMarketValue: 500,
+          listedPortfolioCostValue: 400,
+          unlistedPortfolioSurplus: 0
+        },
+        fieldSources: {
+          listedPortfolioMarketValue: {
+            value: 500,
+            source: 'codal-excel-manual-review',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            confidence: 'medium'
+          }
+        }
+      })
+    );
+
+    expect(summary.status).toBe('complete-needs-review');
+    expect(summary.fields.find((field) => field.field === 'listedPortfolioMarketValue')?.canConfirmReview).toBe(true);
+  });
+
+  it('reviewing an applied suggestion changes completion status to reviewed when all NAV fields exist', () => {
+    const current = record({
+      inputs: {
+        equity: 100,
+        listedPortfolioMarketValue: 500,
+        listedPortfolioCostValue: 400,
+        unlistedPortfolioSurplus: 0,
+        totalShares: 10,
+        currentPrice: 20
+      },
+      fieldSources: {
+        listedPortfolioMarketValue: {
+          value: 500,
+          source: 'codal-excel-manual-review',
+          appliedAt: '2026-07-02T00:00:00.000Z',
+          confidence: 'medium'
+        },
+        equity: {
+          value: 100,
+          source: 'manual',
+          appliedAt: '2026-07-02T00:00:00.000Z',
+          touchedByUser: true
+        },
+        listedPortfolioCostValue: {
+          value: 400,
+          source: 'manual',
+          appliedAt: '2026-07-02T00:00:00.000Z',
+          touchedByUser: true
+        },
+        unlistedPortfolioSurplus: {
+          value: 0,
+          source: 'user-confirmed-zero',
+          appliedAt: '2026-07-02T00:00:00.000Z',
+          reviewedByUser: true
+        },
+        totalShares: {
+          value: 10,
+          source: 'manual',
+          appliedAt: '2026-07-02T00:00:00.000Z',
+          touchedByUser: true
+        },
+        currentPrice: {
+          value: 20,
+          source: 'manual',
+          appliedAt: '2026-07-02T00:00:00.000Z',
+          touchedByUser: true
+        }
+      }
+    });
+
+    const reviewed = markSuggestionFieldReviewed(current, 'listedPortfolioMarketValue', '2026-07-02T01:00:00.000Z');
+
+    expect(buildNavCompletionSummary(current).status).toBe('complete-needs-review');
+    expect(buildNavCompletionSummary(reviewed).status).toBe('complete-reviewed');
+  });
+
+  it('treats user-confirmed zero for unlisted surplus as present', () => {
+    const current = confirmZeroField(record({ inputs: { equity: 100, listedPortfolioMarketValue: 500, listedPortfolioCostValue: 400 } }), 'unlistedPortfolioSurplus');
+    const summary = buildNavCompletionSummary(current);
+
+    expect(current.inputs.unlistedPortfolioSurplus).toBe(0);
+    expect(summary.navTotalMissingFields).not.toContain('unlistedPortfolioSurplus');
+    expect(summary.fields.find((field) => field.field === 'unlistedPortfolioSurplus')?.statusLabel).toBe(
+      'صفر تأییدشده توسط کاربر'
+    );
+  });
+
+  it('keeps NAV/share unavailable when total shares or current price are missing', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: {
+          equity: 100,
+          listedPortfolioMarketValue: 500,
+          listedPortfolioCostValue: 400,
+          unlistedPortfolioSurplus: 0
+        },
+        fieldSources: {
+          equity: {
+            value: 100,
+            source: 'manual',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            touchedByUser: true
+          },
+          listedPortfolioMarketValue: {
+            value: 500,
+            source: 'manual',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            touchedByUser: true
+          },
+          listedPortfolioCostValue: {
+            value: 400,
+            source: 'manual',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            touchedByUser: true
+          },
+          unlistedPortfolioSurplus: {
+            value: 0,
+            source: 'user-confirmed-zero',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            reviewedByUser: true
+          }
+        }
+      })
+    );
+
+    expect(summary.status).toBe('calculable-warning');
+    expect(summary.navShareMissingFields).toEqual(expect.arrayContaining(['totalShares', 'currentPrice']));
+  });
+
+  it('reports cost/market pair warnings', () => {
+    const costOnly = buildNavCompletionSummary(record({ inputs: { listedPortfolioCostValue: 400 } }));
+    const marketOnly = buildNavCompletionSummary(record({ inputs: { listedPortfolioMarketValue: 500 } }));
+
+    expect(costOnly.pairWarnings.join(' ')).toContain('بهای تمام‌شده');
+    expect(marketOnly.pairWarnings.join(' ')).toContain('ارزش روز وارد شده');
+  });
+
+  it('reset applied suggestions does not clear user-confirmed zero', () => {
+    const current = confirmZeroField(
+      record({
+        inputs: {
+          listedPortfolioCostValue: 400
+        },
+        fieldSources: {
+          listedPortfolioCostValue: {
+            value: 400,
+            source: 'codal-suggestion',
+            appliedAt: '2026-07-02T00:00:00.000Z'
+          }
+        }
+      }),
+      'unlistedPortfolioSurplus',
+      '2026-07-02T01:00:00.000Z'
+    );
+
+    const reset = resetCodalSuggestionFields(current, '2026-07-02T02:00:00.000Z');
+
+    expect(reset.inputs.listedPortfolioCostValue).toBeUndefined();
+    expect(reset.inputs.unlistedPortfolioSurplus).toBe(0);
+    expect(reset.fieldSources?.unlistedPortfolioSurplus?.source).toBe('user-confirmed-zero');
+  });
+});

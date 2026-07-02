@@ -7,6 +7,7 @@ export type ManualValueSourceKind =
   | 'codal-excel-manual-review'
   | 'tsetmc-suggestion'
   | 'financial-statement-suggestion'
+  | 'user-confirmed-zero'
   | 'system'
   | 'default';
 
@@ -26,6 +27,8 @@ export interface ManualValueSourceMetadata {
   rawValue?: number;
   scaledValue?: number;
   stale?: boolean;
+  reviewedByUser?: boolean;
+  reviewedAt?: string;
 }
 
 export interface ManualOverrideRecord {
@@ -74,5 +77,16 @@ export function manualFieldMetadata(value: number, appliedAt: string): ManualVal
     source: 'manual',
     appliedAt,
     touchedByUser: true
+  };
+}
+
+export function userConfirmedZeroMetadata(appliedAt: string): ManualValueSourceMetadata {
+  return {
+    value: 0,
+    source: 'user-confirmed-zero',
+    appliedAt,
+    touchedByUser: true,
+    reviewedByUser: true,
+    reviewedAt: appliedAt
   };
 }

@@ -46,6 +46,9 @@ This extension provides an estimate, not an audited valuation.
 - Parsed Codal values never overwrite manual inputs automatically.
 - Applying equity alone or total shares alone does not complete NAV. NAV total still requires equity, listed portfolio market value, listed portfolio cost value, and unlisted portfolio surplus to be present.
 - Blank manual inputs are treated as missing values, not real zero values. Users must type `0` when a field is intentionally zero.
+- The guided NAV completion workflow distinguishes missing values, manual values, suggestion-applied values, reviewed suggestions, legacy values, and user-confirmed zero values. It is an audit aid, not a guarantee that the value is correct.
+- `ثبت صفر با تأیید من` is available for fields such as unlisted portfolio surplus when the user intentionally wants to store zero. Default blank fields are still missing and are not silently converted to zero.
+- `تأیید بررسی دستی` only marks an applied suggestion as reviewed by the user; it does not verify the external report or change the numeric value.
 - Legacy records that only contain default-looking `0` values without manual or Codal source metadata are treated as missing values during loading/migration.
 - Applying a partial Codal suggestion, such as listed portfolio cost without listed portfolio market value, can make the NAV arithmetic negative or incomplete. The UI marks these cases as incomplete or needing manual review instead of treating the result as final.
 - Incomplete NAV is not shown as a final numeric estimate. NAV total, NAV/share, and P/NAV remain unavailable until required inputs are present.

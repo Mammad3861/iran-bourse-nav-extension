@@ -29,6 +29,8 @@ npm run validate:content-scripts
 - Ambiguous market values must not be auto-applied. If filtered manual-review candidates appear, applying one must require explicit warning/confirmation.
 - NAV should remain incomplete until required manual fields are provided.
 - The UI must not show a misleading negative NAV when NAV is incomplete.
+- `مسیر تکمیل NAV` should list the remaining required NAV fields, show total shares as TSETMC-sourced if applied, and allow unlisted surplus to be explicitly confirmed as zero.
+- Suggestion-applied values should show `تأیید بررسی دستی` until the user marks them reviewed.
 - If live Codal discovery fails, monthly/financial slots should say the check failed because of connection/access, not `یافت نشد`. If stale cache is shown, it must be clearly marked stale.
 
 ## وغدیر
@@ -46,11 +48,14 @@ npm run validate:content-scripts
 - `listedPortfolioMarketValue` from Excel should be marked ambiguous when multiple candidates compete.
 - Ambiguous market values must not be auto-applied. If filtered manual-review candidates appear, applying one must require explicit warning/confirmation.
 - NAV should remain incomplete until required manual fields are provided.
+- `مسیر تکمیل NAV` should show missing equity when no valid issuer-level financial statement exists, missing cost unless applied, and reviewed/manual state for any manually selected Excel market value.
+- User-confirmed zero for unlisted surplus should stay present after resetting suggestion-applied values.
 - If live Codal discovery fails, any previous Codal data must be shown only as stale cached data and must not overwrite manual/applied inputs.
 
 ## Safety Invariants
 
 - Manual inputs remain the source of truth.
+- The guided completion workflow must distinguish missing, manual, suggestion-applied, reviewed, stale/legacy, and user-confirmed zero values.
 - Codal suggestions are never auto-applied.
 - Equity and total-share suggestions require explicit user apply actions and do not make NAV complete by themselves.
 - Ambiguous listed market-value candidates require explicit manual review/confirmation and do not become reliable or bulk-applied suggestions.

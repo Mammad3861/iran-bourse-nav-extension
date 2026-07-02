@@ -2,7 +2,7 @@ import type { NavInputs } from '../core/nav-calculator';
 import { emptyNavInputs } from '../core/nav-calculator';
 import type { ExtractedPortfolioValue, MonthlyActivityParseResult, PortfolioValueKind } from './codal-monthly-parser';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from './manual-overrides';
-import { manualFieldMetadata, normalizeManualOverrideRecord } from './manual-overrides';
+import { manualFieldMetadata, normalizeManualOverrideRecord, userConfirmedZeroMetadata } from './manual-overrides';
 
 export const appliedSuggestionSourceKinds: ReadonlySet<ManualValueSourceMetadata['source']> = new Set([
   'codal-suggestion',
@@ -148,5 +148,48 @@ export function resetCodalSuggestionFields(current: ManualOverrideRecord, resetA
     inputs,
     fieldSources,
     updatedAt: resetAt
+  };
+}
+
+export function markSuggestionFieldReviewed(
+  current: ManualOverrideRecord,
+  field: keyof NavInputs,
+  reviewedAt = new Date().toISOString()
+): ManualOverrideRecord {
+  const source = current.fieldSources?.[field];
+  if (!source || !appliedSuggestionSourceKinds.has(source.source)) {
+    return current;
+  }
+
+  return {
+    ...current,
+    fieldSources: {
+      ...(current.fieldSources ?? {}),
+      [field]: {
+        ...source,
+        reviewedByUser: true,
+        reviewedAt
+      }
+    },
+    updatedAt: reviewedAt
+  };
+}
+
+export function confirmZeroField(
+  current: ManualOverrideRecord,
+  field: keyof NavInputs,
+  confirmedAt = new Date().toISOString()
+): ManualOverrideRecord {
+  return {
+    ...current,
+    inputs: {
+      ...current.inputs,
+      [field]: 0
+    },
+    fieldSources: {
+      ...(current.fieldSources ?? {}),
+      [field]: userConfirmedZeroMetadata(confirmedAt)
+    },
+    updatedAt: confirmedAt
   };
 }

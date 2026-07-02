@@ -111,12 +111,16 @@ These values are suggestions only. The widget can copy supported suggestions int
 When a suggestion is applied, the saved manual override records source metadata for that field:
 
 - source: `codal-suggestion`
+- source: `codal-excel-manual-review`, `financial-statement-suggestion`, or `tsetmc-suggestion` for the corresponding reviewed source paths
 - applied timestamp
 - source report title/date
 - confidence level
 - applied value
+- optional user review metadata when the user clicks `تأیید بررسی دستی`
 
 If the user later edits that field manually, the field source is marked back to `manual`.
+
+The guided NAV completion workflow reads this source metadata to show whether each field is missing, manual, suggestion-applied, stale/legacy, reviewed by the user, or a user-confirmed zero. It does not send manual values to Codal or TSETMC.
 
 Equity extraction is deliberately gated. Clarification letters, disclosure reports, subsidiary/other-company financial statements, low-confidence financial selections, negative-score selections, and reports with suspicious issuer warnings are not used for main equity suggestions. Consolidated financial statements may produce only review-needed suggestions with a warning that the value is consolidated.
 

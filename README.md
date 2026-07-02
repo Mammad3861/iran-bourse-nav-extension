@@ -18,6 +18,7 @@ The first version is intentionally **semi-manual**. It injects a small Persian R
 * Codal report discovery and defensive report-detail table detection
 * Limited Codal monthly activity parser with table diagnostics and suggested portfolio values
 * Conservative equity and total-share suggestions from valid issuer-level financial statements/TSETMC instrument info
+* Guided `مسیر تکمیل NAV` workflow for missing fields, source labels, reviewed suggestions, and user-confirmed zero values
 * Unit-tested NAV and parsing logic
 
 ## Formula
@@ -56,6 +57,7 @@ Current MVP behavior:
 7. Shows Codal report metadata and limited suggested values when available.
 8. Requires explicit user action before any suggestion is copied into manual inputs.
 9. Stores source metadata when a Codal suggestion is user-applied, and marks the field manual again after manual edits.
+10. Shows a guided NAV completion section that separates missing fields, manual values, suggestion-applied values, reviewed values, and confirmed zero values.
 
 ## Privacy and Safety
 
@@ -73,6 +75,8 @@ Current MVP behavior:
 * Total-share suggestions may come from TSETMC instrument info or clearly labeled financial-statement rows, but are never inferred from capital unless the source is explicit.
 * Partial Codal suggestions do not make NAV complete. If only cost or only market value is applied, the widget marks the calculation incomplete or needing manual review.
 * Blank inputs are treated as missing, not as real zero. A typed `0` is still accepted as an explicit zero.
+* The guided workflow can store `مازاد ارزش پرتفوی غیربورسی = 0` only after the user clicks `ثبت صفر با تأیید من`.
+* Suggestion-applied fields can be marked as manually reviewed with `تأیید بررسی دستی`; this changes metadata only and does not change the numeric value.
 * Legacy saved records that contain plain zero values without field-source metadata are treated as missing until the user edits or saves those fields.
 * Output is an estimate only and must be verified manually before any financial decision.
 
@@ -89,6 +93,24 @@ Important notes:
 * Some required values may be missing, delayed, or inconsistent.
 * Unlisted portfolio valuation is difficult and may require manual input.
 * Different companies may report portfolio data in different formats.
+
+## Guided NAV Completion
+
+The widget includes `مسیر تکمیل NAV` near the calculation status. It shows which fields are present, which are missing, and which values still need manual review.
+
+Required for NAV total:
+
+* حقوق صاحبان سهام
+* ارزش روز پرتفوی بورسی
+* بهای تمام‌شده پرتفوی بورسی
+* مازاد ارزش پرتفوی غیربورسی
+
+Required for NAV/share and P/NAV:
+
+* تعداد کل سهام
+* قیمت فعلی سهم
+
+Values copied from Codal, Excel, financial statements, or TSETMC are still suggestions until the user explicitly applies them. Applied suggestions may then be marked as reviewed after the user checks the source, period, row/column label, and unit. A blank field is missing; an intentional zero must be typed manually or confirmed through the workflow.
 
 ## Current Smoke-Test Status
 

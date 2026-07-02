@@ -44,6 +44,7 @@ export function suggestionSourceLabel(source: ManualValueSourceMetadata['source'
   if (source === 'codal-excel-manual-review') return 'بررسی دستی Excel کدال';
   if (source === 'codal-suggestion') return 'پیشنهاد کدال';
   if (source === 'manual') return 'ورودی دستی';
+  if (source === 'user-confirmed-zero') return 'صفر تأییدشده توسط کاربر';
   return 'مقدار سیستمی';
 }
 
@@ -51,6 +52,7 @@ export function appliedSourceLabel(field: keyof NavInputs, source: ManualValueSo
   const stale = source.stale ? ' - این مقدار از داده ذخیره‌شده قدیمی اعمال شده است.' : '';
   const effectiveSource = effectiveSourceForField(field, source);
   if (effectiveSource === 'manual') return `${navFieldLabels[field]}: ثبت‌شده به صورت دستی`;
+  if (effectiveSource === 'user-confirmed-zero') return `${navFieldLabels[field]}: صفر تأییدشده توسط کاربر`;
   return `${navFieldLabels[field]}: اعمال‌شده از ${suggestionSourceLabel(effectiveSource)}${stale}`;
 }
 

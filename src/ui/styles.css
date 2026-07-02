@@ -122,6 +122,27 @@
   padding-top: 12px;
 }
 
+.ibnav-completion {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d7dfdc;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 9px;
+}
+
+.ibnav-completion-list {
+  display: grid;
+  gap: 7px;
+}
+
+.ibnav-completion-item {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid #edf2f0;
+  padding-top: 7px;
+}
+
 .ibnav-subtitle {
   margin: 0;
   color: #17201f;
