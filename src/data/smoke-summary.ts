@@ -1,7 +1,8 @@
 import type { NavInputs } from '../core/nav-calculator';
 import type { CodalReportDiscoveryResult } from './codal-client';
 import type { ExtractedPortfolioValue, MonthlyActivityParseResult } from './codal-monthly-parser';
-import type { ManualOverrideRecord } from './manual-overrides';
+import { manualReviewMarketValueSummary } from './market-value-review';
+import type { ManualOverrideRecord, ManualValueSourceKind } from './manual-overrides';
 import type { NavCompletionSummary } from './nav-completion';
 import type { HoldingSupportClassification } from './symbol-classification';
 
@@ -19,8 +20,19 @@ export interface SmokeSummaryInput {
   support?: HoldingSupportClassification;
 }
 
-function sourceFor(record: ManualOverrideRecord | undefined, field: keyof NavInputs): string | undefined {
-  return record?.fieldSources?.[field]?.source;
+function normalizedSourceFor(
+  record: ManualOverrideRecord | undefined,
+  field: keyof NavInputs
+): ManualValueSourceKind | undefined {
+  const source = record?.fieldSources?.[field];
+  if (
+    field === 'totalShares' &&
+    source?.source === 'codal-suggestion' &&
+    /TSETMC/i.test(`${source.reportTitle ?? ''} ${source.rowLabel ?? ''} ${source.columnLabel ?? ''}`)
+  ) {
+    return 'tsetmc-suggestion';
+  }
+  return source?.source;
 }
 
 function compactCandidate(value: ExtractedPortfolioValue): Record<string, unknown> {
@@ -38,8 +50,14 @@ function compactCandidate(value: ExtractedPortfolioValue): Record<string, unknow
 export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unknown> {
   const monthly = input.discovery?.diagnostics?.monthlyActivity;
   const financial = input.discovery?.diagnostics?.financialStatement;
-  const marketReviewCandidateCount =
-    input.parseResult?.secondarySuggestions.filter((value) => value.kind === 'listedPortfolioMarketValue').length ?? 0;
+  const marketReview = input.parseResult ? manualReviewMarketValueSummary(input.parseResult) : undefined;
+  const marketReviewRejectedCandidateCount =
+    input.parseResult?.diagnostics.rejectedCandidates.filter(
+      (item) => item.candidate?.kind === 'listedPortfolioMarketValue'
+    ).length ?? 0;
+  const marketReviewVisibleCandidateCount = marketReview?.visible.length ?? 0;
+  const marketReviewHiddenCandidateCount = marketReview?.hiddenCandidates ?? 0;
+  const marketReviewTotalCandidateCount = (marketReview?.totalCandidates ?? 0) + marketReviewRejectedCandidateCount;
   return {
     symbol: input.symbol,
     instrumentName: input.instrumentName,
@@ -49,7 +67,7 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     currentPrice: input.currentPrice ?? input.record?.inputs.currentPrice,
     currentPriceSource: input.currentPriceSource,
     totalShares: input.record?.inputs.totalShares,
-    totalSharesSource: sourceFor(input.record, 'totalShares'),
+    totalSharesSource: normalizedSourceFor(input.record, 'totalShares'),
     codalDiscoveryStatus: input.discovery?.status,
     fetchCacheStatus: {
       usedCache: input.discovery?.usedCache,
@@ -77,7 +95,11 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
         },
     parserStatus: input.parseResult?.status,
     marketValueStatus: input.parseResult?.diagnostics.sourceStrategy?.marketValueStatus,
-    marketReviewCandidateCount,
+    marketReviewCandidateCount: marketReviewVisibleCandidateCount,
+    marketReviewVisibleCandidateCount,
+    marketReviewHiddenCandidateCount,
+    marketReviewRejectedCandidateCount,
+    marketReviewTotalCandidateCount,
     extractedCandidates: input.parseResult?.extractedValues.map(compactCandidate) ?? [],
     navCompletionStatus: input.navCompletion?.status,
     missingFields: input.navCompletion?.navTotalMissingFields ?? [],

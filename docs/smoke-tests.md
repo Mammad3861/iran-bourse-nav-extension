@@ -20,7 +20,7 @@ npm run validate:content-scripts
 | --- | --- | --- |
 | وصندوق | likely-holding | Symbol and Codal symbol are `وصندوق`; current price is read or cleanly left manual; monthly report is high confidence; issuer-level financial report is valid when available; cost suggestion `136,494,769` appears; Excel market value remains ambiguous and not auto-applied; NAV stays incomplete until required manual fields exist. |
 | وغدیر / وغدير | likely-holding | Arabic/Persian `ی/ي` variants normalize; monthly report is high confidence and matched; no false issuer warning when selected warnings are empty; subsidiary financial statements such as Iran Marine Services are not shown in the main financial slot; cost suggestion `275,218,935` appears; Excel market value remains ambiguous. |
-| شستا | likely-holding or unknown, depending on live Codal shape | Holding-like name should prevent unsupported classification; selected-report warnings should appear only when attached to the selected report, while rejected candidate warnings remain diagnostics-only. |
+| شستا | likely-holding or unknown, depending on live Codal shape | Holding-like name should prevent unsupported classification; exact monthly report symbol match should avoid false issuer warnings even if TSETMC issuer text is weak; selected-report warnings should appear only when attached to the selected report, while rejected candidate warnings remain diagnostics-only. |
 | وبانک | likely-holding or unknown, depending on live Codal shape | Price/basic TSETMC info should work; Codal discovery should prefer exact symbol/issuer reports; if portfolio values are absent or ambiguous, no NAV value should be invented. |
 | وامید | likely-holding or unknown, depending on live Codal shape | Same checks as وبانک; report selection diagnostics should explain selected/rejected reports and Excel/source strategy. |
 | فولاد or فملی | unsupported or unknown | The widget should still show price/basic info and keep the manual calculator usable. It should show `داده کافی برای محاسبه NAV هلدینگی پیدا نشد.` or `این نماد احتمالاً هلدینگ/سرمایه‌گذاری نیست یا داده کافی برای NAV هلدینگی پیدا نشد.` instead of implying holding NAV support. |
@@ -38,6 +38,17 @@ Use `کپی خلاصه Smoke Test` after Codal checks finish. The copied JSON sh
 - NAV completion status and missing fields
 - live fetch/cache status
 
+For `وصندوق`, TSETMC-provided/applied total shares should appear as `totalSharesSource: "tsetmc-suggestion"` even if older saved metadata used `codal-suggestion` with `TSETMC instrument info`.
+
+Market-value review counts are split:
+
+- `marketReviewVisibleCandidateCount`
+- `marketReviewHiddenCandidateCount`
+- `marketReviewRejectedCandidateCount`
+- `marketReviewTotalCandidateCount`
+
+The legacy `marketReviewCandidateCount` means visible/reviewable candidates only.
+
 The compact summary should not include raw Codal tables, full table previews, or large rejected-candidate payloads. Use `کپی تشخیص Parser` or report-selection diagnostics for deep table/report debugging.
 
 ## Safety Invariants
@@ -49,6 +60,7 @@ The compact summary should not include raw Codal tables, full table previews, or
 - Ambiguous listed market-value candidates require explicit manual review/confirmation and do not become reliable or bulk-applied suggestions.
 - Low-confidence, ambiguous, rejected, subsidiary, or clarification reports stay out of main apply-ready UI.
 - Unsupported/non-holding symbols keep the calculator usable and show a clear limitation message.
+- Equity suggestions require a strict aggregate row such as `جمع حقوق صاحبان سهام`, `جمع حقوق مالکانه`, or `حقوق صاحبان سهام`. Component rows such as retained earnings, treasury share premium/discount, reserves, capital, or transfer rows must not become equity suggestions.
 - Codal and Excel network requests stay in the MV3 background/service worker.
 - Content scripts must not directly fetch `codal.ir`, `search.codal.ir`, or `excel.codal.ir`.
 - Failed live Codal fetches must not clear the last successful cached discovery or make a connection failure look like a true no-report result.

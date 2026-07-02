@@ -25,9 +25,11 @@ function record(): ManualOverrideRecord {
       },
       totalShares: {
         value: 2_700_000_000,
-        source: 'tsetmc-suggestion',
+        source: 'codal-suggestion',
         appliedAt: '2026-07-02T00:00:00.000Z',
         reportTitle: 'TSETMC instrument info',
+        rowLabel: 'TSETMC instrument info',
+        columnLabel: 'zTitad / totalShares',
         confidence: 'medium'
       }
     }
@@ -155,6 +157,22 @@ function parseResult(): MonthlyActivityParseResult {
           marketValueColumnCandidates: [],
           failureReasons: [],
           textPreview: 'raw diagnostic table preview must not be copied to smoke summary'
+        },
+        {
+          tableIndex: 8,
+          source: 'codal-excel',
+          sourceGroup: 'monthly-excel',
+          rawHeaders: ['شرح', 'ارزش بازار'],
+          normalizedHeaders: ['شرح', 'ارزش بازار'],
+          firstRawRows: [['جمع', '140,000,000']],
+          firstNormalizedRows: [['جمع', '140000000']],
+          firstRows: [['جمع', '140000000']],
+          detectedLabels: ['جمع', 'ارزش بازار'],
+          totalRowCandidates: [],
+          costColumnCandidates: [],
+          marketValueColumnCandidates: [],
+          failureReasons: [],
+          textPreview: 'excel market table preview must not be copied'
         }
       ],
       sourceStrategy: {
@@ -204,12 +222,17 @@ describe('smoke summary', () => {
       codalDiscoveryStatus: 'found',
       marketValueStatus: 'ambiguous',
       marketReviewCandidateCount: 1,
+      marketReviewVisibleCandidateCount: 1,
+      marketReviewHiddenCandidateCount: 0,
+      marketReviewRejectedCandidateCount: 0,
+      marketReviewTotalCandidateCount: 1,
       navCompletionStatus: 'incomplete',
       missingFields: ['equity', 'listedPortfolioMarketValue', 'unlistedPortfolioSurplus']
     });
     expect(summary).not.toHaveProperty('tablePreviews');
     expect(JSON.stringify(summary)).not.toContain('raw table preview');
     expect(JSON.stringify(summary)).not.toContain('raw diagnostic table preview');
+    expect(JSON.stringify(summary)).not.toContain('excel market table preview');
     expect(JSON.stringify(summary)).not.toContain('گزارش رد شده فقط برای تشخیص');
   });
 
@@ -229,6 +252,48 @@ describe('smoke summary', () => {
       holdingSupport: {
         status: 'unsupported'
       }
+    });
+  });
+
+  it('separates visible, hidden, rejected, and total market-review counts', () => {
+    const parsed = parseResult();
+    parsed.secondarySuggestions = [
+      {
+        kind: 'listedPortfolioMarketValue',
+        label: 'ارزش روز',
+        value: 1,
+        rawText: '1',
+        rawValue: 1,
+        confidence: 'medium',
+        sourceTableIndex: 8,
+        rowLabel: 'ردیف مبهم',
+        columnLabel: 'ارزش بازار'
+      }
+    ];
+    parsed.diagnostics.rejectedCandidates = Array.from({ length: 8 }, (_, index) => ({
+      reason: `rejected market ${index}`,
+      candidate: {
+        kind: 'listedPortfolioMarketValue',
+        label: 'ارزش روز',
+        value: index + 1,
+        rawText: String(index + 1),
+        confidence: 'low',
+        sourceTableIndex: 9
+      }
+    }));
+
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      parseResult: parsed
+    });
+
+    expect(summary).toMatchObject({
+      marketReviewCandidateCount: 0,
+      marketReviewVisibleCandidateCount: 0,
+      marketReviewHiddenCandidateCount: 1,
+      marketReviewRejectedCandidateCount: 8,
+      marketReviewTotalCandidateCount: 9
     });
   });
 });

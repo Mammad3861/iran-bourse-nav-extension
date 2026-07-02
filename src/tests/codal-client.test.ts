@@ -407,6 +407,33 @@ describe('codal-client', () => {
     expect(result.diagnostics?.monthlyActivity?.selectedWarnings).toEqual([]);
   });
 
+  it('keeps Shasta-like exact monthly symbol matches high confidence despite weak issuer-name mismatch', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'شستا',
+            CompanyName: 'سرمایه گذاری تامین اجتماعی',
+            Title: 'گزارش فعالیت ماهانه دوره 1 ماهه منتهی به 1405/03/31',
+            PublishDateTime: '2026-06-25T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('شستا', {
+      requestedIssuerName: 'شستا 123,456',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.status).toBe('found');
+    expect(result.monthlyActivityReport?.symbol).toBe('شستا');
+    expect(result.diagnostics?.monthlyActivity?.selectedConfidence).toBe('high');
+    expect(result.diagnostics?.monthlyActivity?.selectedWarnings).toEqual([]);
+  });
+
   it('does not classify clarification letters as financial statements', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);

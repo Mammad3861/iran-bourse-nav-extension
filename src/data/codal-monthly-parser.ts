@@ -1262,6 +1262,40 @@ function rowMatchesAny(row: string[], patterns: RegExp[]): boolean {
   return row.some((cell) => hasAny(normalizeText(cell), patterns));
 }
 
+function normalizeEquityLabel(value: string | undefined): string {
+  return normalizeText(value ?? '')
+    .replace(/[ي]/g, 'ی')
+    .replace(/[ك]/g, 'ک')
+    .replace(/\u200c/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isStrongEquityTotalRow(row: string[]): boolean {
+  const label = normalizeEquityLabel(rowLabel(row));
+  const compact = label.replace(/\s+/g, '');
+  const strong =
+    compact === 'جمعحقوقمالکانه' ||
+    compact === 'جمعحقوقصاحبانسهام' ||
+    compact === 'جمعحقوقصاحبانسهامشرکتاصلی' ||
+    compact === 'جمعحقوقصاحبانسهاماصلی' ||
+    compact === 'حقوقمالکانه' ||
+    compact === 'حقوقصاحبانسهام';
+  if (!strong) {
+    return false;
+  }
+
+  const componentSignals = [
+    /انتقال\s*از\s*سایر\s*اقلام/,
+    /سود\s*\(?زیان\)?\s*انباشته/,
+    /صرف\s*\(?کسر\)?\s*سهام/,
+    /کسر\s*سهام\s*خزانه/,
+    /اندوخته/,
+    /^سرمایه$/
+  ];
+  return !componentSignals.some((pattern) => pattern.test(label));
+}
+
 function bestNumericCellInRow(
   table: ParsedTable,
   row: string[],
@@ -1302,6 +1336,9 @@ function extractStandaloneFinancialValue(options: {
     if (options.kind === 'totalSharesSuggestion' && rowMatchesAny(row, totalSharesRejectSignals)) {
       continue;
     }
+    if (options.kind === 'equitySuggestion' && !isStrongEquityTotalRow(row)) {
+      continue;
+    }
 
     const numeric = bestNumericCellInRow(options.table, row, options.reportPeriod);
     if (!numeric) continue;
@@ -1309,9 +1346,9 @@ function extractStandaloneFinancialValue(options: {
     const multiplier = options.kind === 'totalSharesSuggestion' ? 1 : options.unitInfo.multiplier;
     const confidence: ParseConfidence =
       options.kind === 'equitySuggestion'
-        ? consolidated && !options.unitInfo.clear
+        ? consolidated
           ? 'low'
-          : consolidated || !options.unitInfo.clear
+          : !options.unitInfo.clear
           ? 'medium'
           : 'high'
         : 'medium';
@@ -1419,7 +1456,7 @@ export function parseFinancialStatementReport(detail: CodalReportDetail): Monthl
   const split = splitPrimarySuggestions(downgradeDuplicateKinds(extractedValues), tables);
   const warnings = [...split.warnings];
   if (!split.primary.some((value) => value.kind === 'equitySuggestion')) {
-    warnings.push('حقوق صاحبان سهام از کدال قابل استخراج نبود؛ برچسب قابل اتکایی در صورت مالی پیدا نشد.');
+    warnings.push('حقوق صاحبان سهام از کدال قابل استخراج نبود؛ ردیف جمع حقوق صاحبان سهام پیدا نشد.');
   }
   if (!split.primary.some((value) => value.kind === 'totalSharesSuggestion')) {
     warnings.push('تعداد کل سهام از کدال قابل استخراج نبود؛ فقط در صورت وجود برچسب صریح پیشنهاد می‌شود.');

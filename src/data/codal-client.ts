@@ -609,6 +609,7 @@ function scoreReportCandidate(options: {
   const { report, requestedSymbol, requestedIssuerName, kind } = options;
   const requestedSymbolNormalized = normalizedSymbol(requestedSymbol);
   const reportSymbolNormalized = normalizedSymbol(report.symbol);
+  const exactSymbolMatch = reportSymbolNormalized === requestedSymbolNormalized;
   const title = normalizeIssuerText(report.title);
   const company = normalizeIssuerText(report.companyName);
   const parentheticals = titleParentheticalSegments(report.title);
@@ -617,7 +618,7 @@ function scoreReportCandidate(options: {
   const rejectedReasons: string[] = [];
   let score = 0;
 
-  if (reportSymbolNormalized === requestedSymbolNormalized) {
+  if (exactSymbolMatch) {
     score += 80;
     reasons.push('نماد گزارش دقیقاً با نماد درخواست‌شده تطبیق دارد.');
   } else if (reportSymbolNormalized) {
@@ -632,9 +633,11 @@ function scoreReportCandidate(options: {
     if (issuerStronglyMatches(report, requestedIssuerName)) {
       score += 35;
       reasons.push('نام ناشر/شرکت با ناشر درخواست‌شده تطبیق قوی دارد.');
-    } else if (company) {
+    } else if (company && !(kind === 'monthly-activity' && exactSymbolMatch && parentheticals.length === 0)) {
       score -= 45;
       warnings.push('نام شرکت گزارش با ناشر تشخیص‌داده‌شده از TSETMC تطبیق قوی ندارد.');
+    } else if (company) {
+      reasons.push('exact symbol match used; weak issuer-name mismatch kept diagnostics-only.');
     } else {
       score -= 15;
       warnings.push('نام شرکت گزارش برای تطبیق ناشر موجود نیست.');

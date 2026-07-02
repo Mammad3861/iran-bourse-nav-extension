@@ -938,6 +938,155 @@ describe('parseMonthlyActivityReport', () => {
     );
   });
 
+  it('rejects individual equity component rows as equity suggestions', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['انتقال از سایر اقلام حقوق مالکانه به سود (زیان) انباشته', '۲,۲۳۴,۹۳۶'],
+              ['سود (زیان) انباشته', '۱۵۰,۵۳۲,۲۴۶'],
+              ['صرف (کسر) سهام خزانه', '۶۹۲,۳۸۸'],
+              ['سرمایه', '۹۰,۰۰۰,۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: {
+                symbol: 'وصندوق',
+                title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹'
+              },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
+    );
+    expect(result.warnings).toContain('حقوق صاحبان سهام از کدال قابل استخراج نبود؛ ردیف جمع حقوق صاحبان سهام پیدا نشد.');
+  });
+
+  it('accepts only explicit total-equity rows for equity suggestions', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['سود (زیان) انباشته', '۱۵۰'],
+              ['جمع حقوق صاحبان سهام', '۱۲۳,۴۵۶']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: {
+                symbol: 'وصندوق',
+                title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹'
+              },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          value: 123_456_000_000,
+          confidence: 'high'
+        })
+      ])
+    );
+  });
+
+  it('downgrades consolidated equity suggestions to low confidence', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی تلفیقی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی تلفیقی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['جمع حقوق صاحبان سهام', '۱۲۳,۴۵۶']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: {
+                symbol: 'وصندوق',
+                title: 'اطلاعات و صورت‌های مالی تلفیقی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹'
+              },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect([...result.extractedValues, ...result.secondarySuggestions]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          confidence: 'low',
+          warning: expect.stringContaining('تلفیقی')
+        })
+      ])
+    );
+  });
+
   it('rejects invalid financial statements before extracting equity', () => {
     const result = parseFinancialStatementReport(
       detail({
