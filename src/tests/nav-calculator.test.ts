@@ -79,6 +79,19 @@ describe('calculateNav', () => {
     expect(analysis.warnings).toContain('محاسبه NAV ناقص است؛ ارزش روز وارد شده اما بهای تمام‌شده وارد نشده است.');
   });
 
+  it('treats manually entered listed market value as present', () => {
+    const analysis = analyzeNavCompleteness({
+      equity: undefined,
+      listedPortfolioMarketValue: 500,
+      listedPortfolioCostValue: 400,
+      unlistedPortfolioSurplus: undefined,
+      totalShares: undefined
+    });
+
+    expect(analysis.missingFields).not.toContain('listedPortfolioMarketValue');
+    expect(analysis.warnings.join(' ')).not.toContain('ارزش روز پرتفوی بورسی وارد نشده است');
+  });
+
   it('treats typed zero as a real explicit value', () => {
     const analysis = analyzeNavCompleteness({
       equity: 100,

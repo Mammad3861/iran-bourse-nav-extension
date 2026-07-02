@@ -29,8 +29,9 @@ import {
 import {
   appliedSourceLabel,
   appliedSuggestionMessage,
+  applyFailureMessage,
+  candidateApplyState,
   isAppliedSuggestionSource,
-  isSuggestionAlreadyApplied,
   navFieldLabels as fieldLabels,
   suggestionSourceKindFor
 } from './suggestion-ui-utils';
@@ -740,7 +741,8 @@ function appendManualReviewMarketCandidates(
       item.appendChild(staleWarning);
     }
 
-    if (isSuggestionAlreadyApplied(getRecord(), value, 'codal-excel-manual-review')) {
+    const state = candidateApplyState(getRecord(), value, 'codal-excel-manual-review', result.reportTitle);
+    if (state === 'exact-applied') {
       const applied = document.createElement('strong');
       applied.className = 'ibnav-status-badge';
       applied.textContent = 'اعمال‌شده';
@@ -748,20 +750,26 @@ function appendManualReviewMarketCandidates(
       details.appendChild(item);
       continue;
     }
+    if (state === 'other-suggestion-applied' || state === 'manual-present') {
+      const note = document.createElement('small');
+      note.className = 'ibnav-warning';
+      note.textContent =
+        state === 'other-suggestion-applied'
+          ? 'کاندید دیگری برای این فیلد اعمال شده است؛ جایگزینی مقدار فعلی با این کاندید نیازمند تأیید شماست.'
+          : 'برای این فیلد مقدار دستی ثبت شده است؛ اعمال این کاندید مقدار فعلی را جایگزین می‌کند.';
+      item.appendChild(note);
+    }
 
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'ibnav-apply';
-    button.textContent = 'اعمال با هشدار شدید';
+    button.textContent = state === 'empty' ? 'اعمال با هشدار شدید' : 'جایگزینی مقدار فعلی با این کاندید';
     button.addEventListener('click', async () => {
       const confirmed = window.confirm(
         'این مقدار از بین چند کاندید مبهم انتخاب می‌شود و ممکن است اشتباه باشد. فقط اگر با گزارش کدال تطبیق داده‌اید اعمال کنید.'
       );
       if (!confirmed) return;
 
-      const input = root.querySelector<HTMLInputElement>('[data-ibnav-field="listedPortfolioMarketValue"]');
-      if (!input) return;
-      input.value = String(value.value);
       const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
       const next = applySuggestionToRecord(current, value, {
         symbol: options.symbol,
@@ -773,16 +781,17 @@ function appendManualReviewMarketCandidates(
       });
 
       try {
-        await persistAppliedRecord(root, next);
-        setRecord(next);
-        updateResetCodalButton(root, next);
+        const saved = await persistAppliedRecord(root, next);
+        applyRecordInputsToForm(root, saved);
+        setRecord(saved);
+        updateResetCodalButton(root, saved);
         button.disabled = true;
         button.textContent = 'اعمال‌شده';
         setApplyStatus(root, appliedSuggestionMessage('listedPortfolioMarketValue', 'codal-excel-manual-review'));
       } catch (error) {
         setApplyStatus(
           root,
-          `ذخیره مقدار بررسی دستی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+          applyFailureMessage(error),
           true
         );
       }
@@ -855,10 +864,24 @@ function setApplyStatus(root: HTMLElement, message: string, isError = false): vo
   status.dataset.state = isError ? 'error' : 'ok';
 }
 
-async function persistAppliedRecord(root: HTMLElement, record: ManualOverrideRecord): Promise<void> {
+function applyRecordInputsToForm(root: HTMLElement, record: ManualOverrideRecord): void {
+  for (const [field, value] of Object.entries(record.inputs) as Array<[keyof NavInputs, number | undefined]>) {
+    const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${field}"]`);
+    if (input) {
+      input.value = value === undefined ? '' : String(value);
+    }
+  }
+}
+
+async function persistAppliedRecord(root: HTMLElement, record: ManualOverrideRecord): Promise<ManualOverrideRecord> {
   await saveManualOverride(record);
-  updateResults(root, formatPersianTimestamp(new Date(record.updatedAt)));
-  updateFieldSourceBadges(root, record);
+  const saved = await getManualOverride(record.symbol);
+  if (!saved) {
+    throw new Error('Saved manual override could not be verified.');
+  }
+  updateResults(root, formatPersianTimestamp(new Date(saved.updatedAt)));
+  updateFieldSourceBadges(root, saved);
+  return saved;
 }
 
 function updateResetCodalButton(root: HTMLElement, record: ManualOverrideRecord | undefined): void {
@@ -921,7 +944,8 @@ function renderMonthlySuggestions(
     (value) =>
       value.confidence === 'high' &&
       suggestionTarget(value.kind) &&
-      !isSuggestionAlreadyApplied(getRecord(), value, suggestionSourceKindFor(value, result.reportTitle))
+      candidateApplyState(getRecord(), value, suggestionSourceKindFor(value, result.reportTitle), result.reportTitle) !==
+        'exact-applied'
   );
   applyAll.onclick = async () => {
     const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
@@ -930,7 +954,12 @@ function renderMonthlySuggestions(
         (suggestion) =>
           suggestion.confidence === 'high' &&
           suggestionTarget(suggestion.kind) &&
-          !isSuggestionAlreadyApplied(getRecord(), suggestion, suggestionSourceKindFor(suggestion, result.reportTitle))
+          candidateApplyState(
+            getRecord(),
+            suggestion,
+            suggestionSourceKindFor(suggestion, result.reportTitle),
+            result.reportTitle
+          ) !== 'exact-applied'
       )
       .reduce(
         (record, suggestion) =>
@@ -944,22 +973,16 @@ function renderMonthlySuggestions(
         current
       );
 
-    for (const [field, value] of Object.entries(next.inputs) as Array<[keyof NavInputs, number | undefined]>) {
-      const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${field}"]`);
-      if (input && value !== undefined) {
-        input.value = String(value);
-      }
-    }
-
     try {
-      await persistAppliedRecord(root, next);
-      setRecord(next);
-      updateResetCodalButton(root, next);
+      const saved = await persistAppliedRecord(root, next);
+      applyRecordInputsToForm(root, saved);
+      setRecord(saved);
+      updateResetCodalButton(root, saved);
       setApplyStatus(root, 'همه موارد قابل اعتماد با تأیید شما اعمال و ذخیره شد.');
     } catch (error) {
       setApplyStatus(
         root,
-        `ذخیره مقدارهای پیشنهادی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+        applyFailureMessage(error),
         true
       );
     }
@@ -1001,20 +1024,32 @@ function renderMonthlySuggestions(
     const safetyWarnings = suggestionSafetyWarnings(value, result);
     const sourceKind = suggestionSourceKindFor(value, result.reportTitle);
     if (target && value.confidence !== 'low') {
-      if (isSuggestionAlreadyApplied(getRecord(), value, sourceKind)) {
+      const state = candidateApplyState(getRecord(), value, sourceKind, result.reportTitle);
+      if (state === 'exact-applied') {
         const applied = document.createElement('strong');
         applied.className = 'ibnav-status-badge';
         applied.textContent = 'اعمال‌شده';
         item.appendChild(applied);
       } else {
+        if (state === 'other-suggestion-applied' || state === 'manual-present') {
+          const note = document.createElement('small');
+          note.className = 'ibnav-warning';
+          note.textContent =
+            state === 'other-suggestion-applied'
+              ? 'کاندید دیگری برای این فیلد اعمال شده است؛ جایگزینی مقدار فعلی با این کاندید نیازمند تأیید شماست.'
+              : 'برای این فیلد مقدار دستی ثبت شده است؛ اعمال این کاندید مقدار فعلی را جایگزین می‌کند.';
+          item.appendChild(note);
+        }
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'ibnav-apply';
-        button.textContent = safetyWarnings.length > 0 ? 'اعمال با هشدار' : 'اعمال مقدار پیشنهادی';
+        button.textContent =
+          state === 'empty'
+            ? safetyWarnings.length > 0
+              ? 'اعمال با هشدار'
+              : 'اعمال مقدار پیشنهادی'
+            : 'جایگزینی مقدار فعلی با این کاندید';
         button.addEventListener('click', async () => {
-        const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${target}"]`);
-        if (!input) return;
-        input.value = String(value.value);
         const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
         const next = applySuggestionToRecord(current, value, {
           symbol: options.symbol,
@@ -1024,16 +1059,17 @@ function renderMonthlySuggestions(
           sourceKind
         });
         try {
-          await persistAppliedRecord(root, next);
-          setRecord(next);
-          updateResetCodalButton(root, next);
+          const saved = await persistAppliedRecord(root, next);
+          applyRecordInputsToForm(root, saved);
+          setRecord(saved);
+          updateResetCodalButton(root, saved);
           button.disabled = true;
           button.textContent = 'اعمال‌شده';
           setApplyStatus(root, appliedSuggestionMessage(target, sourceKind));
         } catch (error) {
           setApplyStatus(
             root,
-            `ذخیره مقدار پیشنهادی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+            applyFailureMessage(error),
             true
           );
         }

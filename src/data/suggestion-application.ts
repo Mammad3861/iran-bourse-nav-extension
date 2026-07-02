@@ -47,6 +47,7 @@ export function sourceMetadataForSuggestion(
     metadata.tableIndex = suggestion.sourceTableIndex;
     metadata.rowLabel = suggestion.rowLabel;
     metadata.columnLabel = suggestion.columnLabel;
+    metadata.rawText = suggestion.rawText;
     metadata.rawValue = suggestion.rawValue;
     metadata.scaledValue = suggestion.scaledValue ?? suggestion.value;
     metadata.stale = context.stale;

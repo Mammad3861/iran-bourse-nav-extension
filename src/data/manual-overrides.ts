@@ -22,6 +22,7 @@ export interface ManualValueSourceMetadata {
   tableIndex?: number;
   rowLabel?: string;
   columnLabel?: string;
+  rawText?: string;
   rawValue?: number;
   scaledValue?: number;
   stale?: boolean;
