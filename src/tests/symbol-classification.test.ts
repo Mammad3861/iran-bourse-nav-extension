@@ -45,6 +45,9 @@ describe('holding support classification', () => {
     expect(classifyHoldingSupport({ instrumentName: 'سرمایه‌گذاری صندوق بازنشستگی' }).status).toBe('likely-holding');
     expect(classifyHoldingSupport({ instrumentName: 'سرمایه گذاری غدیر (هلدینگ)' }).status).toBe('likely-holding');
     expect(classifyHoldingSupport({ instrumentName: 'سرمایه گذاری تامین اجتماعی شستا' }).status).toBe('likely-holding');
+    expect(classifyHoldingSupport({ instrumentName: 'سرمايه‌گذاري‌صندوق‌بازنشستگي‌' }).status).toBe('likely-holding');
+    expect(classifyHoldingSupport({ instrumentName: 'سرمايه گذاري گروه توسعه ملي' }).status).toBe('likely-holding');
+    expect(classifyHoldingSupport({ instrumentName: 'گروه مديريت سرمايه گذاري اميد' }).status).toBe('likely-holding');
   });
 
   it('does not classify a generic monthly activity report as holding support by itself', () => {
@@ -81,6 +84,80 @@ describe('holding support classification', () => {
         })
       }).status
     ).toBe('likely-holding');
+  });
+
+  it('does not classify industrial symbols as holding from generic parser labels alone', () => {
+    const result = classifyHoldingSupport({
+      instrumentName: 'ملي‌ صنايع‌ مس‌ ايران‌',
+      parseResult: parseResult({
+        status: 'ambiguous',
+        tableCandidates: [
+          {
+            index: 0,
+            rowCount: 2,
+            columnCount: 2,
+            matchedLabels: ['سرمایه گذاری ها', 'پرتفوی'],
+            confidence: 'medium'
+          }
+        ],
+        extractedValues: [
+          {
+            kind: 'totalSharesSuggestion',
+            label: 'تعداد سهام',
+            value: 60_000_000_000,
+            rawText: '60,000,000,000',
+            confidence: 'high',
+            sourceTableIndex: 0
+          }
+        ]
+      })
+    });
+
+    expect(result.status).toBe('unknown');
+    expect(result.reasons.join(' ')).toContain('کافی نیستند');
+  });
+
+  it('keeps فولاد unknown or unsupported when no holding name or NAV portfolio candidates exist', () => {
+    const result = classifyHoldingSupport({
+      instrumentName: 'فولاد مبارکه اصفهان',
+      parseResult: parseResult({
+        status: 'ambiguous',
+        tableCandidates: [],
+        extractedValues: [
+          {
+            kind: 'totalSharesSuggestion',
+            label: 'تعداد سهام',
+            value: 800_000_000_000,
+            rawText: '800,000,000,000',
+            confidence: 'high',
+            sourceTableIndex: 0
+          }
+        ]
+      })
+    });
+
+    expect(result.status).not.toBe('likely-holding');
+  });
+
+  it('classifies strong usable NAV portfolio candidates as likely holding even when the name is weak', () => {
+    const result = classifyHoldingSupport({
+      instrumentName: 'نماد نمونه',
+      parseResult: parseResult({
+        status: 'parsed',
+        extractedValues: [
+          {
+            kind: 'listedPortfolioCostValue',
+            label: 'بهای تمام شده',
+            value: 136_494_769,
+            rawText: '136,494,769',
+            confidence: 'high',
+            sourceTableIndex: 3
+          }
+        ]
+      })
+    });
+
+    expect(result.status).toBe('likely-holding');
   });
 
   it('marks completed discovery without portfolio support as unsupported', () => {

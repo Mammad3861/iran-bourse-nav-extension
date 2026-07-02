@@ -535,6 +535,33 @@ describe('codal-client', () => {
     );
   });
 
+  it('rejects فولاد-like financial statements that name another fund in parentheses', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'فولاد',
+            CompanyName: 'فولاد مبارکه اصفهان',
+            Title:
+              'صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت صندوق پژوهش و فناوری غیر دولتی سرمایه گذاری خطرپذیر شرکتی فولاد مبارکه اصفهان)',
+            PublishDateTime: '2026-06-24T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('فولاد', {
+      requestedIssuerName: 'فولاد مبارکه اصفهان',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.financialStatementReport).toBeUndefined();
+    expect(result.diagnostics?.financialStatement?.selectedConfidence).toBe('none');
+    expect(result.diagnostics?.financialStatement?.candidates[0].rejectedReasons.join(' ')).toContain('پرانتز');
+  });
+
   it('includes rejected candidate reasons in report selection diagnostics', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);

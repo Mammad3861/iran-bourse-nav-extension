@@ -64,7 +64,7 @@ function selectedCandidate(
 
 function candidateMentionsOtherCompany(candidate: CodalReportSelectionCandidate | undefined): boolean {
   const text = [...(candidate?.rejectedReasons ?? []), ...(candidate?.warnings ?? [])].join(' ');
-  return /پرانتز|شرکت\/ناشر دیگر|ناشر دیگری|parentheses|another issuer|other company/i.test(text);
+  return /پرانتز.*(?:دیگر|دیگری)|شرکت\/ناشر دیگر|ناشر دیگری|parentheses|another issuer|other company/i.test(text);
 }
 
 function financialIssuerMatchStatus(
@@ -78,6 +78,9 @@ function financialIssuerMatchStatus(
   const candidate = selectedCandidate(selection);
   if (!selection || !candidate) return 'unknown';
   if (candidateMentionsOtherCompany(candidate)) return 'subsidiary-or-other-company';
+  if (!candidate.selected && (candidate.warnings.length > 0 || candidate.rejectedReasons.length > 0)) {
+    return 'weak-name';
+  }
   if (normalizeIssuerToken(candidate.report.symbol) === normalizeIssuerToken(selection.requestedSymbol)) {
     return 'exact-symbol';
   }
@@ -130,6 +133,7 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
   const marketReviewVisibleCandidateCount = marketReview?.visible.length ?? 0;
   const marketReviewHiddenCandidateCount = marketReview?.hiddenCandidates ?? 0;
   const marketReviewTotalCandidateCount = (marketReview?.totalCandidates ?? 0) + marketReviewRejectedCandidateCount;
+
   return {
     symbol: input.symbol,
     instrumentName: input.instrumentName,

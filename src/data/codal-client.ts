@@ -564,6 +564,13 @@ function titleParentheticalSegments(title: string): string[] {
   return Array.from(title.matchAll(/[([]([^()[\]]+)[)\]]/g)).map((match) => normalizeIssuerText(match[1]));
 }
 
+function parentheticalLooksLikeSeparateEntity(segment: string): boolean {
+  const compact = compactIssuerText(segment);
+  return /شرکت|صندوق|مجتمع|نورد|سبا|پژوهش|فناوری|فنآوری|خطرپذیر|صنعتی|بازرگانی|تولیدی|سرمایهگذاری|هلدینگ/.test(
+    compact
+  );
+}
+
 function publishTime(report: CodalReportReference): number {
   const parsed = report.publishedAt ? Date.parse(normalizePersianArabicDigits(report.publishedAt)) : 0;
   return Number.isFinite(parsed) ? parsed : 0;
@@ -665,14 +672,26 @@ function scoreReportCandidate(options: {
     const requestedIssuer = compactIssuerText(requestedIssuerName);
     const reportCompany = compactIssuerText(report.companyName);
     const segmentMatchesRequested =
-      requestedIssuer && (compactSegment.includes(requestedIssuer) || requestedIssuer.includes(compactSegment));
+      requestedIssuer && (compactSegment === requestedIssuer || requestedIssuer.includes(compactSegment));
     const segmentMatchesReportCompany =
-      reportCompany && (compactSegment.includes(reportCompany) || reportCompany.includes(compactSegment));
+      reportCompany && (compactSegment === reportCompany || reportCompany.includes(compactSegment));
     const segmentMatchesValidatedReportCompany = segmentMatchesReportCompany && issuerStronglyMatches(report, requestedIssuerName);
+    if (
+      kind === 'financial-statement' &&
+      compactSegment.length > 5 &&
+      !segmentMatchesRequested &&
+      !segmentMatchesValidatedReportCompany &&
+      parentheticalLooksLikeSeparateEntity(segment)
+    ) {
+      score -= 70;
+      rejectedReasons.push('عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.');
+      continue;
+    }
     const segmentMentionsDifferentCompany =
       compactSegment.length > 5 &&
       !segmentMatchesRequested &&
       !segmentMatchesValidatedReportCompany &&
+      (kind !== 'financial-statement' || parentheticalLooksLikeSeparateEntity(segment)) &&
       (kind === 'financial-statement' || !compactSegment.includes(requestedSymbolNormalized)) &&
       /(شرکت|صنعتی|بازرگانی|تولیدی|سرمایهگذاری|هلدینگ)/.test(compactSegment);
     if (segmentMentionsDifferentCompany) {

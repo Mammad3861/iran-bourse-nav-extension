@@ -354,4 +354,47 @@ describe('smoke summary', () => {
       userFacingWarnings: ['گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد.']
     });
   });
+
+  it('does not report exact-symbol issuer status for unselected weak-name financial candidates', () => {
+    const summary = createSmokeSummary({
+      symbol: 'شستا',
+      currentPriceSource: 'unknown',
+      discovery: {
+        status: 'not-found',
+        symbol: 'شستا',
+        sourceVerified: false,
+        checkedAt: '2026-07-02T00:00:00.000Z',
+        diagnostics: {
+          requestedSymbol: 'شستا',
+          financialStatement: {
+            requestedSymbol: 'شستا',
+            reportKind: 'financial-statement',
+            selectedConfidence: 'none',
+            selectedWarnings: [],
+            candidates: [
+              {
+                report: {
+                  symbol: 'شستا',
+                  title: 'صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹'
+                },
+                score: 65,
+                selected: false,
+                reasons: ['نماد گزارش دقیقاً با نماد درخواست‌شده تطبیق دارد.'],
+                warnings: ['نام شرکت گزارش با ناشر تشخیص‌داده‌شده از TSETMC تطبیق قوی ندارد.'],
+                rejectedReasons: []
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(summary).toMatchObject({
+      financialReport: {
+        status: 'no-valid-issuer-financial-report',
+        issuerMatchStatus: 'weak-name',
+        rejectionReason: 'نام شرکت گزارش با ناشر تشخیص‌داده‌شده از TSETMC تطبیق قوی ندارد.'
+      }
+    });
+  });
 });

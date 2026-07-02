@@ -24,6 +24,21 @@ const holdingNamePatterns = [
 
 const portfolioReportPatterns = [/صورت\s*وضعیت\s*پرتفوی/, /وضعیت\s*پورتفوی/, /پرتفوی/, /پورتفوی/];
 const portfolioTablePatterns = [/سرمایه\s*گذاری/, /سرمایه‌گذاری/, /پرتفوی/, /پورتفوی/];
+const strongPortfolioValueKinds = new Set([
+  'listedPortfolioCostValue',
+  'listedPortfolioMarketValue',
+  'unlistedPortfolioCostValue',
+  'unlistedPortfolioEstimatedValue'
+]);
+
+function normalizeClassificationText(value: string | undefined): string {
+  return (value ?? '')
+    .replace(/[يى]/g, 'ی')
+    .replace(/[ك]/g, 'ک')
+    .replace(/\u200c/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function classifyHoldingSupport(input: {
   instrumentName?: string;
@@ -31,24 +46,22 @@ export function classifyHoldingSupport(input: {
   parseResult?: MonthlyActivityParseResult;
 }): HoldingSupportClassification {
   const reasons: string[] = [];
-  const name = input.instrumentName ?? '';
+  const name = normalizeClassificationText(input.instrumentName);
   if (holdingNamePatterns.some((pattern) => pattern.test(name))) {
     reasons.push('نام ابزار شبیه شرکت سرمایه‌گذاری/هلدینگ است.');
     return { status: 'likely-holding', reasons };
   }
 
-  const monthlyTitle = input.discovery?.monthlyActivityReport?.title ?? input.parseResult?.reportTitle ?? '';
+  const monthlyTitle = normalizeClassificationText(
+    input.discovery?.monthlyActivityReport?.title ?? input.parseResult?.reportTitle
+  );
   if (portfolioReportPatterns.some((pattern) => pattern.test(monthlyTitle))) {
     reasons.push('گزارش پرتفوی مرتبط پیدا شد.');
     return { status: 'likely-holding', reasons };
   }
 
   const hasPortfolioValue = Boolean(
-    input.parseResult?.extractedValues.some((value) =>
-      ['listedPortfolioCostValue', 'listedPortfolioMarketValue', 'unlistedPortfolioCostValue', 'unlistedPortfolioEstimatedValue'].includes(
-        value.kind
-      )
-    ) ||
+    input.parseResult?.extractedValues.some((value) => strongPortfolioValueKinds.has(value.kind)) ||
       input.parseResult?.secondarySuggestions.some((value) => value.kind === 'listedPortfolioMarketValue')
   );
   if (hasPortfolioValue) {
@@ -58,12 +71,19 @@ export function classifyHoldingSupport(input: {
 
   const hasPortfolioTableSignal = Boolean(
     input.parseResult?.tableCandidates.some((candidate) =>
-      candidate.matchedLabels.some((label) => portfolioTablePatterns.some((pattern) => pattern.test(label)))
+      candidate.matchedLabels.some((label) =>
+        portfolioTablePatterns.some((pattern) => pattern.test(normalizeClassificationText(label)))
+      )
     )
   );
   if (hasPortfolioTableSignal) {
     reasons.push('برچسب‌های جدول پرتفوی/سرمایه‌گذاری در Parser پیدا شد.');
-    return { status: 'likely-holding', reasons };
+    reasons.push('این برچسب‌ها بدون کاندید NAV قابل اتکا برای تشخیص هلدینگ بودن کافی نیستند.');
+    return {
+      status: 'unknown',
+      message: unsupportedMessage,
+      reasons
+    };
   }
 
   const discoveryFinished = input.discovery?.status === 'found' || input.discovery?.status === 'not-found';
