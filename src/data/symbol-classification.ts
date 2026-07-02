@@ -9,6 +9,9 @@ export interface HoldingSupportClassification {
   reasons: string[];
 }
 
+const unsupportedMessage =
+  'این نماد احتمالاً برای محاسبه NAV هلدینگی پشتیبانی نمی‌شود یا داده کافی ندارد. محاسبه دستی همچنان ممکن است.';
+
 const holdingNamePatterns = [
   /سرمایه\s*گذاری/,
   /سرمایه‌گذاری/,
@@ -72,7 +75,7 @@ export function classifyHoldingSupport(input: {
     reasons.push('گزارش یا جدول پرتفوی/سرمایه‌گذاری قابل اتکا پیدا نشد.');
     return {
       status: 'unsupported',
-      message: 'این نماد احتمالاً هلدینگ/سرمایه‌گذاری نیست یا داده کافی برای NAV هلدینگی پیدا نشد.',
+      message: unsupportedMessage,
       reasons
     };
   }
@@ -80,7 +83,7 @@ export function classifyHoldingSupport(input: {
   reasons.push('برای تشخیص نوع نماد داده کافی وجود ندارد.');
   return {
     status: 'unknown',
-    message: 'داده کافی برای محاسبه NAV هلدینگی پیدا نشد.',
+    message: unsupportedMessage,
     reasons
   };
 }

@@ -296,4 +296,62 @@ describe('smoke summary', () => {
       marketReviewTotalCandidateCount: 9
     });
   });
+
+  it('marks subsidiary financial reports as issuer mismatch in smoke summaries', () => {
+    const summary = createSmokeSummary({
+      symbol: 'فولاد',
+      instrumentName: 'فولاد مبارکه اصفهان',
+      codalSymbol: 'فولاد',
+      currentPrice: 5_000,
+      currentPriceSource: 'dom-latest-trade',
+      support: {
+        status: 'unknown',
+        message: 'این نماد احتمالاً برای محاسبه NAV هلدینگی پشتیبانی نمی‌شود یا داده کافی ندارد. محاسبه دستی همچنان ممکن است.',
+        reasons: ['برای تشخیص نوع نماد داده کافی وجود ندارد.']
+      },
+      discovery: {
+        status: 'not-found',
+        symbol: 'فولاد',
+        sourceVerified: false,
+        checkedAt: '2026-07-02T00:00:00.000Z',
+        diagnostics: {
+          requestedSymbol: 'فولاد',
+          requestedIssuerName: 'فولاد مبارکه اصفهان',
+          financialStatement: {
+            requestedSymbol: 'فولاد',
+            requestedIssuerName: 'فولاد مبارکه اصفهان',
+            reportKind: 'financial-statement',
+            selectedConfidence: 'none',
+            selectedWarnings: [],
+            candidates: [
+              {
+                report: {
+                  symbol: 'فولاد',
+                  companyName: 'فولاد مبارکه اصفهان',
+                  title: 'صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت مجتمع فولاد و نورد سبا اصفهان)'
+                },
+                score: 50,
+                selected: false,
+                reasons: ['نماد گزارش دقیقاً با نماد درخواست‌شده تطبیق دارد.'],
+                warnings: [],
+                rejectedReasons: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.']
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    expect(summary).toMatchObject({
+      currentPrice: 5_000,
+      holdingSupport: { status: 'unknown' },
+      financialReport: {
+        status: 'issuer-mismatch',
+        confidence: 'none',
+        issuerMatchStatus: 'subsidiary-or-other-company',
+        rejectionReason: 'عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'
+      },
+      userFacingWarnings: ['گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد.']
+    });
+  });
 });

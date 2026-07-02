@@ -1,5 +1,5 @@
 import type { NavInputs } from '../core/nav-calculator';
-import type { CodalReportDiscoveryResult } from './codal-client';
+import type { CodalReportDiscoveryResult, CodalReportSelectionCandidate, CodalReportSelectionDiagnostics } from './codal-client';
 import type { ExtractedPortfolioValue, MonthlyActivityParseResult } from './codal-monthly-parser';
 import { manualReviewMarketValueSummary } from './market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceKind } from './manual-overrides';
@@ -47,9 +47,81 @@ function compactCandidate(value: ExtractedPortfolioValue): Record<string, unknow
   };
 }
 
+function normalizeIssuerToken(value: string | undefined): string {
+  return (value ?? '')
+    .replace(/[ي]/g, 'ی')
+    .replace(/[ك]/g, 'ک')
+    .replace(/\u200c/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function selectedCandidate(
+  selection: CodalReportSelectionDiagnostics | undefined
+): CodalReportSelectionCandidate | undefined {
+  return selection?.candidates.find((candidate) => candidate.selected) ?? selection?.candidates[0];
+}
+
+function candidateMentionsOtherCompany(candidate: CodalReportSelectionCandidate | undefined): boolean {
+  const text = [...(candidate?.rejectedReasons ?? []), ...(candidate?.warnings ?? [])].join(' ');
+  return /پرانتز|شرکت\/ناشر دیگر|ناشر دیگری|parentheses|another issuer|other company/i.test(text);
+}
+
+function financialIssuerMatchStatus(
+  selection: CodalReportSelectionDiagnostics | undefined
+):
+  | 'exact-symbol'
+  | 'strong-name'
+  | 'weak-name'
+  | 'subsidiary-or-other-company'
+  | 'unknown' {
+  const candidate = selectedCandidate(selection);
+  if (!selection || !candidate) return 'unknown';
+  if (candidateMentionsOtherCompany(candidate)) return 'subsidiary-or-other-company';
+  if (normalizeIssuerToken(candidate.report.symbol) === normalizeIssuerToken(selection.requestedSymbol)) {
+    return 'exact-symbol';
+  }
+  if (candidate.reasons.some((reason) => /ناشر\/شرکت|strong issuer/i.test(reason))) {
+    return 'strong-name';
+  }
+  if (candidate.warnings.length > 0 || candidate.rejectedReasons.length > 0) {
+    return 'weak-name';
+  }
+  return 'unknown';
+}
+
+function financialRejectionReason(selection: CodalReportSelectionDiagnostics | undefined): string | undefined {
+  const candidate = selectedCandidate(selection);
+  return candidate ? [...candidate.rejectedReasons, ...candidate.warnings][0] : undefined;
+}
+
+function financialReportSummary(
+  discovery: CodalReportDiscoveryResult | undefined
+): Record<string, unknown> | undefined {
+  const financial = discovery?.diagnostics?.financialStatement;
+  const issuerMatchStatus = financialIssuerMatchStatus(financial);
+  const rejectionReason = financialRejectionReason(financial);
+  if (discovery?.financialStatementReport) {
+    return {
+      status: 'valid-issuer-financial-report',
+      title: discovery.financialStatementReport.title,
+      confidence: financial?.selectedConfidence,
+      warnings: financial?.selectedWarnings ?? [],
+      issuerMatchStatus,
+      rejectionReason
+    };
+  }
+  return {
+    status: issuerMatchStatus === 'subsidiary-or-other-company' ? 'issuer-mismatch' : 'no-valid-issuer-financial-report',
+    confidence: financial?.selectedConfidence,
+    warnings: financial?.selectedWarnings ?? [],
+    issuerMatchStatus,
+    rejectionReason
+  };
+}
+
 export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unknown> {
   const monthly = input.discovery?.diagnostics?.monthlyActivity;
-  const financial = input.discovery?.diagnostics?.financialStatement;
   const marketReview = input.parseResult ? manualReviewMarketValueSummary(input.parseResult) : undefined;
   const marketReviewRejectedCandidateCount =
     input.parseResult?.diagnostics.rejectedCandidates.filter(
@@ -82,17 +154,7 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
           warnings: monthly?.selectedWarnings ?? []
         }
       : undefined,
-    financialReport: input.discovery?.financialStatementReport
-      ? {
-          title: input.discovery.financialStatementReport.title,
-          confidence: financial?.selectedConfidence,
-          warnings: financial?.selectedWarnings ?? []
-        }
-      : {
-          status: financial?.selectedConfidence === 'none' ? 'no-valid-issuer-financial-report' : input.discovery?.status,
-          confidence: financial?.selectedConfidence,
-          warnings: financial?.selectedWarnings ?? []
-        },
+    financialReport: financialReportSummary(input.discovery),
     parserStatus: input.parseResult?.status,
     marketValueStatus: input.parseResult?.diagnostics.sourceStrategy?.marketValueStatus,
     marketReviewCandidateCount: marketReviewVisibleCandidateCount,
@@ -104,7 +166,13 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     navCompletionStatus: input.navCompletion?.status,
     missingFields: input.navCompletion?.navTotalMissingFields ?? [],
     navShareMissingFields: input.navCompletion?.navShareMissingFields ?? [],
-    userFacingWarnings: input.parseResult?.warnings.slice(0, 8) ?? []
+    userFacingWarnings: [
+      ...(input.parseResult?.warnings.slice(0, 8) ?? []),
+      ...((input.support?.status === 'unsupported' || input.support?.status === 'unknown') &&
+      !input.discovery?.financialStatementReport
+        ? ['گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد.']
+        : [])
+    ]
   };
 }
 

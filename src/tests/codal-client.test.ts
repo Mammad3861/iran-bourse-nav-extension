@@ -503,6 +503,38 @@ describe('codal-client', () => {
     );
   });
 
+  it('rejects فولاد-like financial statements that name another company in parentheses', async () => {
+    const storage = createChromeStorageMock();
+    vi.stubGlobal('chrome', storage.chrome);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        Letters: [
+          {
+            Symbol: 'فولاد',
+            CompanyName: 'فولاد مبارکه اصفهان',
+            Title: 'صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت مجتمع فولاد و نورد سبا اصفهان)',
+            PublishDateTime: '2026-06-24T09:00:00'
+          }
+        ]
+      })
+    );
+
+    const result = await discoverLatestCodalReports('فولاد', {
+      requestedIssuerName: 'فولاد مبارکه اصفهان',
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(result.financialStatementReport).toBeUndefined();
+    expect(result.diagnostics?.financialStatement?.selectedConfidence).toBe('none');
+    expect(result.diagnostics?.financialStatement?.candidates[0]).toEqual(
+      expect.objectContaining({
+        rejectedReasons: expect.arrayContaining([
+          expect.stringContaining('عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند')
+        ])
+      })
+    );
+  });
+
   it('includes rejected candidate reasons in report selection diagnostics', async () => {
     const storage = createChromeStorageMock();
     vi.stubGlobal('chrome', storage.chrome);

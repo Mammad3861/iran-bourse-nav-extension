@@ -54,7 +54,7 @@ describe('holding support classification', () => {
     });
 
     expect(result.status).toBe('unknown');
-    expect(result.message).toBe('داده کافی برای محاسبه NAV هلدینگی پیدا نشد.');
+    expect(result.message).toContain('محاسبه دستی');
   });
 
   it('classifies portfolio report wording and parser portfolio values as likely holding support', () => {
@@ -95,6 +95,6 @@ describe('holding support classification', () => {
     });
 
     expect(result.status).toBe('unsupported');
-    expect(result.message).toBe('این نماد احتمالاً هلدینگ/سرمایه‌گذاری نیست یا داده کافی برای NAV هلدینگی پیدا نشد.');
+    expect(result.message).toContain('محاسبه دستی');
   });
 });

@@ -663,12 +663,17 @@ function scoreReportCandidate(options: {
   for (const segment of parentheticals) {
     const compactSegment = compactIssuerText(segment);
     const requestedIssuer = compactIssuerText(requestedIssuerName);
+    const reportCompany = compactIssuerText(report.companyName);
     const segmentMatchesRequested =
       requestedIssuer && (compactSegment.includes(requestedIssuer) || requestedIssuer.includes(compactSegment));
+    const segmentMatchesReportCompany =
+      reportCompany && (compactSegment.includes(reportCompany) || reportCompany.includes(compactSegment));
+    const segmentMatchesValidatedReportCompany = segmentMatchesReportCompany && issuerStronglyMatches(report, requestedIssuerName);
     const segmentMentionsDifferentCompany =
       compactSegment.length > 5 &&
       !segmentMatchesRequested &&
-      !compactSegment.includes(requestedSymbolNormalized) &&
+      !segmentMatchesValidatedReportCompany &&
+      (kind === 'financial-statement' || !compactSegment.includes(requestedSymbolNormalized)) &&
       /(شرکت|صنعتی|بازرگانی|تولیدی|سرمایهگذاری|هلدینگ)/.test(compactSegment);
     if (segmentMentionsDifferentCompany) {
       score -= 70;
