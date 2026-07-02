@@ -14,52 +14,41 @@ npm run validate:manifest
 npm run validate:content-scripts
 ```
 
-## وصندوق
+## Smoke Matrix
 
-- TSETMC symbol: `وصندوق`
-- Codal symbol: `وصندوق`
-- Current price should be detected or cleanly left manual.
-- Monthly Codal report should be selected with high confidence.
-- Financial report should be valid when an issuer-level financial statement is available.
-- Monthly report detail and ExcelUrl should be fetched when available.
-- Parser should suggest `listedPortfolioCostValue = 136,494,769`.
-- If a valid issuer-level financial statement is available, equity may appear only as a reviewable suggestion.
-- If TSETMC exposes total shares, it may appear only as a reviewable suggestion.
-- `listedPortfolioMarketValue` from Excel should be marked ambiguous when multiple candidates compete.
-- Ambiguous market values must not be auto-applied. If filtered manual-review candidates appear, applying one must require explicit warning/confirmation.
-- NAV should remain incomplete until required manual fields are provided.
-- The UI must not show a misleading negative NAV when NAV is incomplete.
-- `مسیر تکمیل NAV` should list the remaining required NAV fields, show total shares as TSETMC-sourced if applied, and allow unlisted surplus to be explicitly confirmed as zero.
-- Suggestion-applied values should show `تأیید بررسی دستی` until the user marks them reviewed.
-- If live Codal discovery fails, monthly/financial slots should say the check failed because of connection/access, not `یافت نشد`. If stale cache is shown, it must be clearly marked stale.
+| Symbol | Expected classification | Key checks |
+| --- | --- | --- |
+| وصندوق | likely-holding | Symbol and Codal symbol are `وصندوق`; current price is read or cleanly left manual; monthly report is high confidence; issuer-level financial report is valid when available; cost suggestion `136,494,769` appears; Excel market value remains ambiguous and not auto-applied; NAV stays incomplete until required manual fields exist. |
+| وغدیر / وغدير | likely-holding | Arabic/Persian `ی/ي` variants normalize; monthly report is high confidence and matched; no false issuer warning when selected warnings are empty; subsidiary financial statements such as Iran Marine Services are not shown in the main financial slot; cost suggestion `275,218,935` appears; Excel market value remains ambiguous. |
+| شستا | likely-holding or unknown, depending on live Codal shape | Holding-like name should prevent unsupported classification; selected-report warnings should appear only when attached to the selected report, while rejected candidate warnings remain diagnostics-only. |
+| وبانک | likely-holding or unknown, depending on live Codal shape | Price/basic TSETMC info should work; Codal discovery should prefer exact symbol/issuer reports; if portfolio values are absent or ambiguous, no NAV value should be invented. |
+| وامید | likely-holding or unknown, depending on live Codal shape | Same checks as وبانک; report selection diagnostics should explain selected/rejected reports and Excel/source strategy. |
+| فولاد or فملی | unsupported or unknown | The widget should still show price/basic info and keep the manual calculator usable. It should show `داده کافی برای محاسبه NAV هلدینگی پیدا نشد.` or `این نماد احتمالاً هلدینگ/سرمایه‌گذاری نیست یا داده کافی برای NAV هلدینگی پیدا نشد.` instead of implying holding NAV support. |
 
-## وغدیر
+## Compact Smoke Summary
 
-- TSETMC may expose `وغدير`; Codal/report data may use `وغدیر`.
-- Persian/Arabic `ی/ي` normalization must match these symbols.
-- Monthly Codal report should be selected with high confidence.
-- The selection notice should say the report matched symbol/issuer.
-- The main financial report section should show `صورت مالی معتبر برای ناشر پیدا نشد` if only subsidiary, clarification, or other-company financial reports are available.
-- Subsidiary reports such as `شرکت ایران مارین سرویسز` must remain in diagnostics only and must not appear in the main financial report slot.
-- ExcelUrl should be fetched when available.
-- Parser should suggest `listedPortfolioCostValue = 275,218,935`.
-- If only subsidiary or invalid financial statements are available, no equity suggestion should be created from those reports.
-- If TSETMC exposes total shares, it may appear only as a reviewable suggestion.
-- `listedPortfolioMarketValue` from Excel should be marked ambiguous when multiple candidates compete.
-- Ambiguous market values must not be auto-applied. If filtered manual-review candidates appear, applying one must require explicit warning/confirmation.
-- NAV should remain incomplete until required manual fields are provided.
-- `مسیر تکمیل NAV` should show missing equity when no valid issuer-level financial statement exists, missing cost unless applied, and reviewed/manual state for any manually selected Excel market value.
-- User-confirmed zero for unlisted surplus should stay present after resetting suggestion-applied values.
-- If live Codal discovery fails, any previous Codal data must be shown only as stale cached data and must not overwrite manual/applied inputs.
+Use `کپی خلاصه Smoke Test` after Codal checks finish. The copied JSON should include compact public/debug fields only:
+
+- symbol, instrument name, InsCode, Codal symbol
+- current price and source
+- total shares and source
+- monthly/financial report confidence and selected warnings
+- parser status, market-value status, manual-review candidate count
+- extracted suggestion candidates
+- NAV completion status and missing fields
+- live fetch/cache status
+
+The compact summary should not include raw Codal tables, full table previews, or large rejected-candidate payloads. Use `کپی تشخیص Parser` or report-selection diagnostics for deep table/report debugging.
 
 ## Safety Invariants
 
 - Manual inputs remain the source of truth.
 - The guided completion workflow must distinguish missing, manual, suggestion-applied, reviewed, stale/legacy, and user-confirmed zero values.
-- Codal suggestions are never auto-applied.
+- Codal/TSETMC/Excel values are suggestions only and are never auto-applied.
 - Equity and total-share suggestions require explicit user apply actions and do not make NAV complete by themselves.
 - Ambiguous listed market-value candidates require explicit manual review/confirmation and do not become reliable or bulk-applied suggestions.
 - Low-confidence, ambiguous, rejected, subsidiary, or clarification reports stay out of main apply-ready UI.
+- Unsupported/non-holding symbols keep the calculator usable and show a clear limitation message.
 - Codal and Excel network requests stay in the MV3 background/service worker.
 - Content scripts must not directly fetch `codal.ir`, `search.codal.ir`, or `excel.codal.ir`.
 - Failed live Codal fetches must not clear the last successful cached discovery or make a connection failure look like a true no-report result.

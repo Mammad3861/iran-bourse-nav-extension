@@ -21,6 +21,8 @@ import { manualReviewMarketValueSummary } from '../data/market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from '../data/manual-overrides';
 import { manualFieldMetadata, normalizeManualOverrideRecord } from '../data/manual-overrides';
 import { buildNavCompletionSummary, navCompletionFieldLabels } from '../data/nav-completion';
+import { smokeSummaryText } from '../data/smoke-summary';
+import { classifyHoldingSupport, type HoldingSupportClassification } from '../data/symbol-classification';
 import {
   applySuggestionToRecord,
   confirmZeroField,
@@ -696,7 +698,8 @@ function appendManualReviewMarketCandidates(
   root: HTMLElement,
   options: NavWidgetOptions,
   getRecord: () => ManualOverrideRecord | undefined,
-  setRecord: (record: ManualOverrideRecord) => void
+  setRecord: (record: ManualOverrideRecord) => void,
+  support?: HoldingSupportClassification
 ): void {
   const reviewSummary = manualReviewMarketValueSummary(result);
   const shouldShowEmptyState =
@@ -788,7 +791,7 @@ function appendManualReviewMarketCandidates(
         applyRecordInputsToForm(root, saved);
         setRecord(saved);
         updateResetCodalButton(root, saved);
-        updateCompletionWorkflow(root, options, getRecord, setRecord, result);
+        updateCompletionWorkflow(root, options, getRecord, setRecord, result, support);
         button.disabled = true;
         button.textContent = 'اعمال‌شده';
         setApplyStatus(root, appliedSuggestionMessage('listedPortfolioMarketValue', 'codal-excel-manual-review'));
@@ -914,7 +917,8 @@ function updateCompletionWorkflow(
   options: NavWidgetOptions,
   getRecord: () => ManualOverrideRecord | undefined,
   setRecord: (record: ManualOverrideRecord) => void,
-  latestParseResult?: MonthlyActivityParseResult
+  latestParseResult?: MonthlyActivityParseResult,
+  support?: HoldingSupportClassification
 ): void {
   const container = root.querySelector<HTMLElement>('[data-ibnav-completion]');
   if (!container) return;
@@ -941,6 +945,13 @@ function updateCompletionWorkflow(
     summary.navShareGuidance
   ].join(' ');
   container.appendChild(summaryText);
+
+  if (support?.message && support.status !== 'likely-holding') {
+    const unsupported = document.createElement('p');
+    unsupported.className = 'ibnav-warning';
+    unsupported.textContent = support.message;
+    container.appendChild(unsupported);
+  }
 
   if (summary.navTotalMissingFields.length) {
     const missing = document.createElement('p');
@@ -988,7 +999,7 @@ function updateCompletionWorkflow(
           applyRecordInputsToForm(root, saved);
           setRecord(saved);
           updateResetCodalButton(root, saved);
-          updateCompletionWorkflow(root, options, getRecord, setRecord, latestParseResult);
+          updateCompletionWorkflow(root, options, getRecord, setRecord, latestParseResult, support);
           setApplyStatus(root, `${field.label} با مقدار صفر و تأیید شما ذخیره شد.`);
         } catch (error) {
           setApplyStatus(root, applyFailureMessage(error), true);
@@ -1009,7 +1020,7 @@ function updateCompletionWorkflow(
           const saved = await persistAppliedRecord(root, next);
           setRecord(saved);
           updateResetCodalButton(root, saved);
-          updateCompletionWorkflow(root, options, getRecord, setRecord, latestParseResult);
+          updateCompletionWorkflow(root, options, getRecord, setRecord, latestParseResult, support);
           setApplyStatus(root, `${field.label} به‌عنوان بررسی‌شده علامت‌گذاری شد.`);
         } catch (error) {
           setApplyStatus(root, applyFailureMessage(error), true);
@@ -1028,7 +1039,8 @@ function renderMonthlySuggestions(
   result: MonthlyActivityParseResult,
   options: NavWidgetOptions,
   getRecord: () => ManualOverrideRecord | undefined,
-  setRecord: (record: ManualOverrideRecord) => void
+  setRecord: (record: ManualOverrideRecord) => void,
+  support?: HoldingSupportClassification
 ): void {
   const status = root.querySelector('[data-ibnav-suggestions="status"]');
   const source = root.querySelector('[data-ibnav-suggestions="source"]');
@@ -1096,7 +1108,7 @@ function renderMonthlySuggestions(
       applyRecordInputsToForm(root, saved);
       setRecord(saved);
       updateResetCodalButton(root, saved);
-      updateCompletionWorkflow(root, options, getRecord, setRecord, result);
+      updateCompletionWorkflow(root, options, getRecord, setRecord, result, support);
       setApplyStatus(root, 'همه موارد قابل اعتماد با تأیید شما اعمال و ذخیره شد.');
     } catch (error) {
       setApplyStatus(
@@ -1182,7 +1194,7 @@ function renderMonthlySuggestions(
           applyRecordInputsToForm(root, saved);
           setRecord(saved);
           updateResetCodalButton(root, saved);
-          updateCompletionWorkflow(root, options, getRecord, setRecord, result);
+          updateCompletionWorkflow(root, options, getRecord, setRecord, result, support);
           button.disabled = true;
           button.textContent = 'اعمال‌شده';
           setApplyStatus(root, appliedSuggestionMessage(target, sourceKind));
@@ -1223,7 +1235,7 @@ function renderMonthlySuggestions(
     list.appendChild(item);
   }
 
-  appendManualReviewMarketCandidates(list, result, root, options, getRecord, setRecord);
+  appendManualReviewMarketCandidates(list, result, root, options, getRecord, setRecord, support);
 }
 
 export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLElement> {
@@ -1234,6 +1246,8 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   let activeRecord = await getManualOverride(options.symbol);
   activeRecord = activeRecord ? normalizeManualOverrideRecord(activeRecord) : undefined;
   let latestParseResult: MonthlyActivityParseResult | undefined;
+  let latestDiscoveryResult: CodalReportDiscoveryResult | undefined;
+  let latestSupport: HoldingSupportClassification | undefined;
   const inputs = activeRecord?.inputs ?? emptyNavInputs();
   inputs.currentPrice = inputs.currentPrice ?? options.currentPrice;
 
@@ -1287,6 +1301,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <div class="ibnav-row"><span>صورت مالی</span><span data-ibnav-codal="financial">-</span></div>
         <a class="ibnav-link" data-ibnav-codal-link="financial" target="_blank" rel="noreferrer" hidden>مشاهده صورت مالی</a>
         <div data-ibnav-codal="diagnostics"></div>
+        <button type="button" class="ibnav-save ibnav-secondary" data-ibnav-smoke-copy>کپی خلاصه Smoke Test</button>
         <div class="ibnav-row"><span>جزئیات آخرین گزارش</span><span data-ibnav-codal-detail="status">در انتظار نتیجه جستجو</span></div>
         <div class="ibnav-row"><span>زمان دریافت جزئیات</span><span data-ibnav-codal-detail="fetchedAt">-</span></div>
         <p class="ibnav-muted" data-ibnav-codal-detail="warning">ساختار گزارش ممکن است در این نسخه پشتیبانی نشود.</p>
@@ -1312,7 +1327,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   updateFieldSourceBadges(root, activeRecord);
   updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
     activeRecord = record;
-  }, latestParseResult);
+  }, latestParseResult, latestSupport);
   const codalSymbolValidation = validateCodalSearchSymbol(options.codalSymbol ?? options.symbol);
   const loadCodalDiscovery = async (): Promise<void> => {
     if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
@@ -1333,6 +1348,8 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     try {
       const result = await requestCodalDiscovery(codalSymbolValidation.symbol, options.instrumentName);
       if (!isActiveWidgetRender(root, renderId)) return;
+      latestDiscoveryResult = result;
+      latestSupport = classifyHoldingSupport({ instrumentName: options.instrumentName, discovery: result });
       renderCodalDiscovery(root, result);
       const reports = [result.monthlyActivityReport, result.financialStatementReport].filter(
         (report): report is CodalReportReference => Boolean(report)
@@ -1342,6 +1359,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           status: result.status === 'network-error' || result.status === 'cors-blocked' || result.status === 'parse-error' ? 'network-error' : 'unavailable',
           errorMessage: result.errorMessage
         });
+        updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
+          activeRecord = record;
+        }, latestParseResult, latestSupport);
         return;
       }
 
@@ -1379,12 +1399,17 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         }
           const mergedResult = mergeMonthlyActivityParseResults(parseResults);
           latestParseResult = result.status === 'stale-cache' ? markParseResultStale(mergedResult, result.cachedAt) : mergedResult;
+          latestSupport = classifyHoldingSupport({
+            instrumentName: options.instrumentName,
+            discovery: result,
+            parseResult: latestParseResult
+          });
           renderMonthlySuggestions(root, latestParseResult, options, () => activeRecord, (record) => {
             activeRecord = record;
-          });
+          }, latestSupport);
           updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
             activeRecord = record;
-          }, latestParseResult);
+          }, latestParseResult, latestSupport);
       }
     } catch (error: unknown) {
       if (!isActiveWidgetRender(root, renderId)) return;
@@ -1395,6 +1420,13 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         sourceVerified: false,
         checkedAt: new Date().toISOString()
       });
+      latestDiscoveryResult = {
+        status: 'network-error',
+        symbol: options.symbol,
+        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
+        sourceVerified: false,
+        checkedAt: new Date().toISOString()
+      };
       renderCodalDetail(root, {
         status: 'network-error',
         errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت جزئیات کدال'
@@ -1405,6 +1437,39 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   root.querySelector<HTMLButtonElement>('[data-ibnav-codal="retry"]')?.addEventListener('click', () => {
     void loadCodalDiscovery();
   });
+
+  root.querySelector<HTMLButtonElement>('[data-ibnav-smoke-copy]')?.addEventListener('click', async () => {
+    const currentRecord = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, activeRecord);
+    const completion = buildNavCompletionSummary(currentRecord, latestParseResult);
+    const payload = smokeSummaryText({
+      symbol: options.symbol,
+      instrumentName: options.instrumentName,
+      insCode: options.insCode,
+      codalSymbol: options.codalSymbol,
+      currentPrice: currentRecord.inputs.currentPrice ?? options.currentPrice,
+      currentPriceSource: currentRecord.currentPriceSource,
+      record: currentRecord,
+      discovery: latestDiscoveryResult,
+      parseResult: latestParseResult,
+      navCompletion: completion,
+      support: latestSupport
+    });
+    const fallbackContainer =
+      root.querySelector<HTMLElement>('[data-ibnav-codal="diagnostics"]') ??
+      root.querySelector<HTMLElement>('[data-ibnav-completion]') ??
+      root;
+    const outcome = await copyTextWithFallback(payload, window.navigator.clipboard, (text) =>
+      showManualCopyFallback(fallbackContainer, text)
+    );
+    setApplyStatus(
+      root,
+      outcome === 'copied'
+        ? 'خلاصه Smoke Test کپی شد.'
+        : 'کپی خودکار انجام نشد؛ خلاصه Smoke Test برای کپی دستی نمایش داده شد.',
+      outcome !== 'copied'
+    );
+  });
+
   void loadCodalDiscovery();
 
   root.querySelectorAll<HTMLInputElement>('.ibnav-input').forEach((input) => {
@@ -1425,7 +1490,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       updateResults(root, formatPersianTimestamp());
       updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
         activeRecord = record;
-      }, latestParseResult);
+      }, latestParseResult, latestSupport);
     });
   });
 
@@ -1445,7 +1510,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       updateFieldSourceBadges(root, activeRecord);
       updateCompletionWorkflow(root, options, () => activeRecord, (nextRecord) => {
         activeRecord = nextRecord;
-      }, latestParseResult);
+      }, latestParseResult, latestSupport);
       setApplyStatus(root, 'ورودی‌های دستی ذخیره شد.');
     } catch (error) {
       setApplyStatus(
@@ -1474,7 +1539,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       updateFieldSourceBadges(root, activeRecord);
       updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
         activeRecord = record;
-      }, latestParseResult);
+      }, latestParseResult, latestSupport);
       setApplyStatus(root, 'مقادیر پیشنهادی اعمال‌شده پاک شد؛ مقادیر دستی حفظ شد.');
     } catch (error) {
       setApplyStatus(

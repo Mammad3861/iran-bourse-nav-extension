@@ -89,3 +89,9 @@ Observed during limited public Codal smoke testing on 2026-06-28:
 - Some Codal pages expose data inside script variables or JSON-like row/cell structures rather than visible HTML tables. The extension detects a limited set of these shapes, but unsupported structures should produce warnings instead of guesses.
 
 The MVP avoids aggressive scraping and does not run scheduled background collection.
+
+## Smoke-Test and Unsupported-Symbol Notes
+
+- Unsupported or non-holding symbols, such as ordinary operating companies, may not have portfolio/NAV inputs in Codal. In that case the widget should keep price/basic info and manual inputs available while showing `داده کافی برای محاسبه NAV هلدینگی پیدا نشد.` or `این نماد احتمالاً هلدینگ/سرمایه‌گذاری نیست یا داده کافی برای NAV هلدینگی پیدا نشد.`
+- Holding support classification is heuristic. It uses instrument-name hints, portfolio report titles, parser portfolio values, and parser table labels. It should not treat a generic monthly activity report alone as proof that the issuer is a holding/investment company.
+- The compact smoke-test summary is intended for regression review. It includes selected status, source, completion, and candidate counts, but intentionally excludes raw Codal table previews and large rejected-candidate payloads.

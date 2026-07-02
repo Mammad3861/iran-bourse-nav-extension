@@ -51,6 +51,17 @@ function hasSelectedWarnings(selection: CodalReportSelectionDiagnostics | undefi
   return Boolean(selection?.selectedReport && selection.selectedWarnings.length > 0);
 }
 
+function isBenignSelectionWarning(warning: string): boolean {
+  return warning.includes('ناشر ورودی قابل اتکا نبود') || warning.includes('input issuer');
+}
+
+function hasSuspiciousSelectedWarnings(selection: CodalReportSelectionDiagnostics | undefined): boolean {
+  return Boolean(
+    selection?.selectedReport &&
+      selection.selectedWarnings.some((warning) => !isBenignSelectionWarning(warning))
+  );
+}
+
 function normalizeSymbol(value: string | undefined): string {
   return (value ?? '')
     .replace(/[ي]/g, 'ی')
@@ -62,6 +73,9 @@ function normalizeSymbol(value: string | undefined): string {
 
 function isHighConfidenceMonthlySymbolMatch(selection: CodalReportSelectionDiagnostics | undefined): boolean {
   if (!selection?.selectedReport || selection.reportKind !== 'monthly-activity' || selection.selectedConfidence !== 'high') {
+    return false;
+  }
+  if (hasSuspiciousSelectedWarnings(selection)) {
     return false;
   }
   return normalizeSymbol(selection.requestedSymbol) === normalizeSymbol(selection.selectedReport.symbol);
@@ -78,7 +92,7 @@ export function discoverySelectionNotice(result: CodalReportDiscoveryResult): st
   if (selections.some(isCleanSelectedReport)) {
     return 'گزارش انتخاب‌شده با نماد/ناشر تطبیق داده شد.';
   }
-  if (selections.some(hasSelectedWarnings)) {
+  if (selections.some(hasSuspiciousSelectedWarnings) || (selections.some(hasSelectedWarnings) && !isHighConfidenceMonthlySymbolMatch(monthly))) {
     return 'گزارش انتخاب‌شده ممکن است مربوط به ناشر دیگری باشد؛ تشخیص گزارش را بررسی کنید.';
   }
   if (result.diagnostics) {

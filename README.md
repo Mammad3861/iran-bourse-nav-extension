@@ -253,6 +253,8 @@ public/icons/       Extension icons
 * Improve Codal detail table detection for HTML, JSON, and script-embedded table data
 * Add diagnostics-driven total-row extraction, unit/scale hints, and parser diagnostics for suggested values
 * Add stronger review workflow before accepting parsed values
+* Add compact smoke-test summaries for real-symbol regression checks
+* Add unsupported/non-holding symbol handling so the calculator remains usable without implying holding NAV support
 
 ### v1.0
 
