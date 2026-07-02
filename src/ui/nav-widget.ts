@@ -17,16 +17,23 @@ import {
 } from '../data/codal-monthly-parser';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
 import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
-import { manualReviewMarketValueCandidates } from '../data/market-value-review';
+import { manualReviewMarketValueSummary } from '../data/market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from '../data/manual-overrides';
 import { manualFieldMetadata, normalizeManualOverrideRecord } from '../data/manual-overrides';
 import {
-  applyHighConfidenceSuggestionsToRecord,
   applySuggestionToRecord,
   markFieldAsManual,
   resetCodalSuggestionFields,
   suggestionTarget
 } from '../data/suggestion-application';
+import {
+  appliedSourceLabel,
+  appliedSuggestionMessage,
+  isAppliedSuggestionSource,
+  isSuggestionAlreadyApplied,
+  navFieldLabels as fieldLabels,
+  suggestionSourceKindFor
+} from './suggestion-ui-utils';
 import {
   codalDiscoveryDiagnosticsJson,
   copyTextWithFallback,
@@ -36,7 +43,7 @@ import {
 import {
   compactParserWarnings,
   discoverySelectionNotice as sharedDiscoverySelectionNotice,
-  financialReportSummary,
+  financialReportDiscoverySummary,
   sourceStrategySummaryText
 } from './codal-display-utils';
 import styles from './styles.css?inline';
@@ -54,15 +61,6 @@ export interface NavWidgetOptions {
   currentPriceSource: ManualOverrideRecord['currentPriceSource'];
   mount?: HTMLElement;
 }
-
-const fieldLabels: Record<keyof NavInputs, string> = {
-  equity: 'حقوق صاحبان سهام',
-  listedPortfolioMarketValue: 'ارزش روز پرتفوی بورسی',
-  listedPortfolioCostValue: 'بهای تمام‌شده پرتفوی بورسی',
-  unlistedPortfolioSurplus: 'مازاد ارزش پرتفوی غیربورسی',
-  totalShares: 'تعداد کل سهام',
-  currentPrice: 'قیمت فعلی سهم'
-};
 
 const inputFields: Array<keyof NavInputs> = [
   'equity',
@@ -171,9 +169,7 @@ function monthlySummaryForDiscovery(result: CodalReportDiscoveryResult): string 
 }
 
 function financialSummaryForDiscovery(result: CodalReportDiscoveryResult): string {
-  if (result.financialStatementReport) return financialReportSummary(result.financialStatementReport);
-  if (result.status === 'not-found') return financialReportSummary(undefined);
-  return discoveryUnavailableReportText(result);
+  return financialReportDiscoverySummary(result);
 }
 
 function discoveryStatusText(result: CodalReportDiscoveryResult): string {
@@ -483,9 +479,7 @@ function diagnosticsGroupLabel(sourceGroup: string | undefined): string {
 }
 
 function hasCodalAppliedFields(record: ManualOverrideRecord | undefined): boolean {
-  return Object.values(record?.fieldSources ?? {}).some(
-    (source) => source?.source === 'codal-suggestion' || source?.source === 'codal-excel-manual-review'
-  );
+  return Object.values(record?.fieldSources ?? {}).some((source) => isAppliedSuggestionSource(source?.source));
 }
 
 function showManualCopyFallback(container: HTMLElement, text: string): void {
@@ -522,12 +516,6 @@ function appendMonthlyDiagnostics(
   if (result.diagnostics.sourceStrategy) {
     const sourceStrategy = document.createElement('p');
     sourceStrategy.className = 'ibnav-muted';
-    sourceStrategy.textContent = [
-      'منبع ارزش روز پرتفوی بورسی',
-      `وضعیت: ${result.diagnostics.sourceStrategy.marketValueStatus === 'found' ? 'پیدا شد' : 'پیدا نشد'}`,
-      `Excel: ${result.diagnostics.sourceStrategy.excel.status}`,
-      ...result.diagnostics.sourceStrategy.messages
-    ].join(' | ');
     sourceStrategy.textContent = sourceStrategySummaryText(result.diagnostics.sourceStrategy);
     preview.appendChild(sourceStrategy);
   }
@@ -674,10 +662,6 @@ function appendMonthlyDiagnostics(
     preview.appendChild(groupDetails);
   }
 
-  const candidateTitle = document.createElement('h5');
-  candidateTitle.className = 'ibnav-subtitle';
-  candidateTitle.textContent = 'کاندیدهای استخراج‌شده';
-  preview.appendChild(candidateTitle);
   list.appendChild(preview);
 }
 
@@ -710,8 +694,21 @@ function appendManualReviewMarketCandidates(
   getRecord: () => ManualOverrideRecord | undefined,
   setRecord: (record: ManualOverrideRecord) => void
 ): void {
-  const candidates = manualReviewMarketValueCandidates(result);
-  if (candidates.length === 0) return;
+  const reviewSummary = manualReviewMarketValueSummary(result);
+  const shouldShowEmptyState =
+    reviewSummary.totalCandidates > 0 || result.diagnostics.sourceStrategy?.marketValueStatus === 'ambiguous';
+  if (reviewSummary.visible.length === 0) {
+    if (!shouldShowEmptyState) return;
+    const empty = document.createElement('p');
+    empty.className = 'ibnav-muted';
+    empty.textContent = [
+      'کاندید قابل نمایش برای بررسی دستی ارزش روز پیدا نشد؛ جزئیات کامل در تشخیص Parser موجود است.',
+      `کاندیدهای قابل بررسی: 0`,
+      `کاندیدهای حذف‌شده از نمایش: ${formatNumberFa(reviewSummary.hiddenCandidates)}`
+    ].join(' ');
+    list.appendChild(empty);
+    return;
+  }
 
   const stale = result.warnings.some((warning) => warning.includes('داده ذخیره‌شده قدیمی'));
   const details = document.createElement('details');
@@ -722,10 +719,14 @@ function appendManualReviewMarketCandidates(
 
   const intro = document.createElement('p');
   intro.className = 'ibnav-warning';
-  intro.textContent = 'این گزینه‌ها مبهم هستند و فقط پس از تطبیق دستی با گزارش کدال باید اعمال شوند.';
+  intro.textContent = [
+    'این گزینه‌ها مبهم هستند و فقط پس از تطبیق دستی با گزارش کدال باید اعمال شوند.',
+    `کاندیدهای قابل بررسی: ${formatNumberFa(reviewSummary.visible.length)}.`,
+    `کاندیدهای حذف‌شده از نمایش: ${formatNumberFa(reviewSummary.hiddenCandidates)}.`
+  ].join(' ');
   details.appendChild(intro);
 
-  for (const value of candidates) {
+  for (const value of reviewSummary.visible) {
     const item = document.createElement('div');
     item.className = 'ibnav-suggestion';
     const text = document.createElement('span');
@@ -737,6 +738,15 @@ function appendManualReviewMarketCandidates(
       staleWarning.className = 'ibnav-warning';
       staleWarning.textContent = 'این مقدار از داده ذخیره‌شده قدیمی اعمال خواهد شد.';
       item.appendChild(staleWarning);
+    }
+
+    if (isSuggestionAlreadyApplied(getRecord(), value, 'codal-excel-manual-review')) {
+      const applied = document.createElement('strong');
+      applied.className = 'ibnav-status-badge';
+      applied.textContent = 'اعمال‌شده';
+      item.appendChild(applied);
+      details.appendChild(item);
+      continue;
     }
 
     const button = document.createElement('button');
@@ -766,7 +776,9 @@ function appendManualReviewMarketCandidates(
         await persistAppliedRecord(root, next);
         setRecord(next);
         updateResetCodalButton(root, next);
-        setApplyStatus(root, 'ارزش روز پرتفوی بورسی با بررسی دستی از کدال اعمال و ذخیره شد.');
+        button.disabled = true;
+        button.textContent = 'اعمال‌شده';
+        setApplyStatus(root, appliedSuggestionMessage('listedPortfolioMarketValue', 'codal-excel-manual-review'));
       } catch (error) {
         setApplyStatus(
           root,
@@ -795,7 +807,7 @@ function recordFromCurrentInputs(
     const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${field}"]`);
     if (inputs[field] === undefined) {
       delete fieldSources[field];
-    } else if (input?.dataset.ibnavTouched === 'true' && fieldSources[field]?.source !== 'codal-suggestion') {
+    } else if (input?.dataset.ibnavTouched === 'true' && !isAppliedSuggestionSource(fieldSources[field]?.source)) {
       fieldSources[field] = manualFieldMetadata(inputs[field], timestamp);
     }
   }
@@ -862,13 +874,10 @@ function updateFieldSourceBadges(root: HTMLElement, record: ManualOverrideRecord
   container.textContent = '';
   const fieldSources = record?.fieldSources ?? {};
   for (const [field, source] of Object.entries(fieldSources) as Array<[keyof NavInputs, ManualValueSourceMetadata]>) {
-    if (source.source !== 'codal-suggestion' && source.source !== 'codal-excel-manual-review') continue;
+    if (source.source === 'system' || source.source === 'default') continue;
     const item = document.createElement('p');
     item.className = 'ibnav-muted';
-    item.textContent =
-      source.source === 'codal-excel-manual-review'
-        ? `${fieldLabels[field]}: اعمال‌شده از کدال / بررسی دستی${source.stale ? ' - این مقدار از داده ذخیره‌شده قدیمی اعمال شده است.' : ''}`
-        : `${fieldLabels[field]}: اعمال‌شده از پیشنهاد کدال`;
+    item.textContent = appliedSourceLabel(field, source);
     container.appendChild(item);
   }
 }
@@ -904,22 +913,36 @@ function renderMonthlySuggestions(
   const compactWarnings = compactParserWarnings(result.warnings);
   warnings.textContent = compactWarnings.length
     ? compactWarnings.join(' ')
-    : 'Ù¾ÛŒØ´ Ø§Ø² Ø§Ø¹Ù…Ø§Ù„ØŒ Ø§Ø¹Ø¯Ø§Ø¯ Ø±Ø§ Ø¨Ø§ Ú¯Ø²Ø§Ø±Ø´ Ø±Ø³Ù…ÛŒ ØªØ·Ø¨ÛŒÙ‚ Ø¯Ù‡ÛŒØ¯.';
+    : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.';
 
   list.textContent = '';
   appendMonthlyDiagnostics(list, result, (message, isError) => setApplyStatus(root, message, isError));
-  appendManualReviewMarketCandidates(list, result, root, options, getRecord, setRecord);
   applyAll.hidden = !result.extractedValues.some(
-    (value) => value.confidence === 'high' && suggestionTarget(value.kind)
+    (value) =>
+      value.confidence === 'high' &&
+      suggestionTarget(value.kind) &&
+      !isSuggestionAlreadyApplied(getRecord(), value, suggestionSourceKindFor(value, result.reportTitle))
   );
   applyAll.onclick = async () => {
     const current = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
-    const next = applyHighConfidenceSuggestionsToRecord(current, result, {
-      symbol: options.symbol,
-      currentPriceSource: options.currentPriceSource,
-      reportTitle: result.reportTitle,
-      reportDate: result.reportPeriod
-    });
+    const next = result.extractedValues
+      .filter(
+        (suggestion) =>
+          suggestion.confidence === 'high' &&
+          suggestionTarget(suggestion.kind) &&
+          !isSuggestionAlreadyApplied(getRecord(), suggestion, suggestionSourceKindFor(suggestion, result.reportTitle))
+      )
+      .reduce(
+        (record, suggestion) =>
+          applySuggestionToRecord(record, suggestion, {
+            symbol: options.symbol,
+            currentPriceSource: options.currentPriceSource,
+            reportTitle: result.reportTitle,
+            reportDate: result.reportPeriod,
+            sourceKind: suggestionSourceKindFor(suggestion, result.reportTitle)
+          }),
+        current
+      );
 
     for (const [field, value] of Object.entries(next.inputs) as Array<[keyof NavInputs, number | undefined]>) {
       const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${field}"]`);
@@ -949,6 +972,13 @@ function renderMonthlySuggestions(
     list.appendChild(empty);
   }
 
+  if (result.extractedValues.length > 0) {
+    const title = document.createElement('h5');
+    title.className = 'ibnav-subtitle';
+    title.textContent = 'پیشنهادهای قابل اعمال';
+    list.appendChild(title);
+  }
+
   for (const value of result.extractedValues) {
     const item = document.createElement('div');
     item.className = 'ibnav-suggestion';
@@ -969,12 +999,19 @@ function renderMonthlySuggestions(
 
     const target = suggestionTarget(value.kind);
     const safetyWarnings = suggestionSafetyWarnings(value, result);
+    const sourceKind = suggestionSourceKindFor(value, result.reportTitle);
     if (target && value.confidence !== 'low') {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'ibnav-apply';
-      button.textContent = safetyWarnings.length > 0 ? 'اعمال با هشدار' : 'اعمال مقدار پیشنهادی';
-      button.addEventListener('click', async () => {
+      if (isSuggestionAlreadyApplied(getRecord(), value, sourceKind)) {
+        const applied = document.createElement('strong');
+        applied.className = 'ibnav-status-badge';
+        applied.textContent = 'اعمال‌شده';
+        item.appendChild(applied);
+      } else {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ibnav-apply';
+        button.textContent = safetyWarnings.length > 0 ? 'اعمال با هشدار' : 'اعمال مقدار پیشنهادی';
+        button.addEventListener('click', async () => {
         const input = root.querySelector<HTMLInputElement>(`[data-ibnav-field="${target}"]`);
         if (!input) return;
         input.value = String(value.value);
@@ -983,13 +1020,16 @@ function renderMonthlySuggestions(
           symbol: options.symbol,
           currentPriceSource: options.currentPriceSource,
           reportTitle: result.reportTitle,
-          reportDate: result.reportPeriod
+          reportDate: result.reportPeriod,
+          sourceKind
         });
         try {
           await persistAppliedRecord(root, next);
           setRecord(next);
           updateResetCodalButton(root, next);
-          setApplyStatus(root, 'مقدار پیشنهادی با تأیید شما اعمال و ذخیره شد.');
+          button.disabled = true;
+          button.textContent = 'اعمال‌شده';
+          setApplyStatus(root, appliedSuggestionMessage(target, sourceKind));
         } catch (error) {
           setApplyStatus(
             root,
@@ -997,8 +1037,9 @@ function renderMonthlySuggestions(
             true
           );
         }
-      });
-      item.appendChild(button);
+        });
+        item.appendChild(button);
+      }
     }
 
     const ignoreButton = document.createElement('button');
@@ -1025,6 +1066,8 @@ function renderMonthlySuggestions(
     }
     list.appendChild(item);
   }
+
+  appendManualReviewMarketCandidates(list, result, root, options, getRecord, setRecord);
 }
 
 export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLElement> {
@@ -1206,8 +1249,8 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       const parsed = parseLocalizedNumber(input.value);
       if (
         field &&
-        (activeRecord?.fieldSources?.[field]?.source === 'codal-suggestion' ||
-          activeRecord?.fieldSources?.[field]?.source === 'codal-excel-manual-review')
+        activeRecord &&
+        isAppliedSuggestionSource(activeRecord?.fieldSources?.[field]?.source)
       ) {
         activeRecord = markFieldAsManual(activeRecord, field, parsed);
         updateResetCodalButton(root, activeRecord);
@@ -1258,7 +1301,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       updateResults(root, formatPersianTimestamp(new Date(next.updatedAt)));
       updateResetCodalButton(root, activeRecord);
       updateFieldSourceBadges(root, activeRecord);
-      setApplyStatus(root, 'مقادیر پیشنهادی اعمال‌شده از کدال پاک شد؛ مقادیر دستی حفظ شد.');
+      setApplyStatus(root, 'مقادیر پیشنهادی اعمال‌شده پاک شد؛ مقادیر دستی حفظ شد.');
     } catch (error) {
       setApplyStatus(
         root,

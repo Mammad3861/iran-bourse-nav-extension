@@ -5,6 +5,8 @@ export type ManualValueSourceKind =
   | 'manual'
   | 'codal-suggestion'
   | 'codal-excel-manual-review'
+  | 'tsetmc-suggestion'
+  | 'financial-statement-suggestion'
   | 'system'
   | 'default';
 

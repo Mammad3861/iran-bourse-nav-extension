@@ -45,13 +45,11 @@ function isTinyCandidate(candidate: ExtractedPortfolioValue): boolean {
   return raw > 0 && raw < 10 && (candidate.unitMultiplier ?? 1) === 1;
 }
 
-export function manualReviewMarketValueCandidates(result: MonthlyActivityParseResult): ExtractedPortfolioValue[] {
+function uniqueMarketValueCandidates(result: MonthlyActivityParseResult): ExtractedPortfolioValue[] {
   const candidates = [...result.secondarySuggestions, ...result.extractedValues].filter(
     (candidate) => candidate.kind === 'listedPortfolioMarketValue'
   );
-  const hasCurrentPeriodCandidate = candidates.some((candidate) => candidate.period);
   const seen = new Set<string>();
-
   return candidates.filter((candidate) => {
     const key = [
       candidate.value,
@@ -62,14 +60,38 @@ export function manualReviewMarketValueCandidates(result: MonthlyActivityParseRe
     ].join('|');
     if (seen.has(key)) return false;
     seen.add(key);
+    return true;
+  });
+}
 
+export interface ManualReviewMarketValueSummary {
+  visible: ExtractedPortfolioValue[];
+  totalCandidates: number;
+  hiddenCandidates: number;
+}
+
+export function manualReviewMarketValueSummary(result: MonthlyActivityParseResult): ManualReviewMarketValueSummary {
+  const candidates = uniqueMarketValueCandidates(result);
+  const hasCurrentPeriodCandidate = candidates.some((candidate) => candidate.period);
+
+  const visible = candidates.filter((candidate) => {
     if (candidate.value <= 0 || (candidate.rawValue ?? candidate.value) <= 0) return false;
     if (isTinyCandidate(candidate)) return false;
     if (!isStrongTotalRow(candidate.rowLabel)) return false;
     if (!isStrongMarketColumn(candidate.columnLabel)) return false;
     if (!isEligibleSource(result, candidate)) return false;
     if (hasCurrentPeriodCandidate && candidate.periodLabel && !candidate.period) return false;
-    if ((candidate.rankingScore ?? 0) < 55) return false;
+    if ((candidate.rankingScore ?? 55) < 35) return false;
     return true;
   });
+
+  return {
+    visible,
+    totalCandidates: candidates.length,
+    hiddenCandidates: candidates.length - visible.length
+  };
+}
+
+export function manualReviewMarketValueCandidates(result: MonthlyActivityParseResult): ExtractedPortfolioValue[] {
+  return manualReviewMarketValueSummary(result).visible;
 }

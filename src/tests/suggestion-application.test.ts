@@ -288,13 +288,28 @@ describe('suggestion application', () => {
     const applied = applySuggestionToRecord(undefined, suggestion('totalSharesSuggestion', 9_000_000_000), {
       symbol: 'وصندوق',
       currentPriceSource: 'manual',
+      sourceKind: 'tsetmc-suggestion',
       appliedAt: '2026-06-28T10:00:00.000Z'
     });
     const analysis = analyzeNavCompleteness(applied.inputs);
 
     expect(applied.inputs.totalShares).toBe(9_000_000_000);
-    expect(applied.fieldSources?.totalShares?.source).toBe('codal-suggestion');
+    expect(applied.fieldSources?.totalShares?.source).toBe('tsetmc-suggestion');
     expect(analysis.navTotalAvailable).toBe(false);
     expect(calculateNav(applied.inputs).navPerShare).toBe(0);
+  });
+
+  it('reset applied suggestions clears TSETMC suggestion fields too', () => {
+    const applied = applySuggestionToRecord(undefined, suggestion('totalSharesSuggestion', 9_000_000_000), {
+      symbol: 'وصندوق',
+      currentPriceSource: 'manual',
+      sourceKind: 'tsetmc-suggestion',
+      appliedAt: '2026-06-28T10:00:00.000Z'
+    });
+
+    const reset = resetCodalSuggestionFields(applied, '2026-06-28T11:00:00.000Z');
+
+    expect(reset.inputs.totalShares).toBeUndefined();
+    expect(reset.fieldSources?.totalShares).toBeUndefined();
   });
 });

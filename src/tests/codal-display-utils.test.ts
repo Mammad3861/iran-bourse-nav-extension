@@ -3,6 +3,7 @@ import type { CodalReportDiscoveryResult, CodalSourceStrategyDiagnostics } from 
 import {
   compactParserWarnings,
   discoverySelectionNotice,
+  financialReportDiscoverySummary,
   financialReportSummary,
   marketValueStatusText,
   sourceStrategySummaryText
@@ -164,5 +165,29 @@ describe('codal display utilities', () => {
 
   it('labels missing financial statements clearly', () => {
     expect(financialReportSummary(undefined)).toBe('صورت مالی معتبر برای ناشر پیدا نشد');
+  });
+
+  it('keeps stale cached no-valid-financial state when live discovery fails', () => {
+    const result: CodalReportDiscoveryResult = {
+      status: 'stale-cache',
+      symbol: 'وغدیر',
+      sourceVerified: false,
+      checkedAt: '2026-07-01T00:00:00.000Z',
+      errorMessage: 'Failed to fetch',
+      diagnostics: {
+        requestedSymbol: 'وغدیر',
+        financialStatement: {
+          requestedSymbol: 'وغدیر',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'none',
+          selectedWarnings: [],
+          candidates: []
+        }
+      }
+    };
+
+    expect(financialReportDiscoverySummary(result)).toBe(
+      'بررسی زنده ناموفق بود؛ آخرین نتیجه ذخیره‌شده: صورت مالی معتبر برای ناشر پیدا نشد'
+    );
   });
 });

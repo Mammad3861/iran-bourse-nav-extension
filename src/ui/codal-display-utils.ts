@@ -98,3 +98,13 @@ export function reportSummary(report: CodalReportReference | undefined): string 
 export function financialReportSummary(report: CodalReportReference | undefined): string {
   return report ? reportSummary(report) : 'صورت مالی معتبر برای ناشر پیدا نشد';
 }
+
+export function financialReportDiscoverySummary(result: CodalReportDiscoveryResult): string {
+  if (result.financialStatementReport) return financialReportSummary(result.financialStatementReport);
+  if (result.status === 'stale-cache' && result.diagnostics?.financialStatement?.selectedConfidence === 'none') {
+    return `بررسی زنده ناموفق بود؛ آخرین نتیجه ذخیره‌شده: ${financialReportSummary(undefined)}`;
+  }
+  if (result.status === 'not-found') return financialReportSummary(undefined);
+  if (result.status === 'stale-cache') return 'نمایش از داده ذخیره‌شده قدیمی';
+  return 'به‌دلیل خطای اتصال بررسی نشد';
+}

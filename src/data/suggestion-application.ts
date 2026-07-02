@@ -4,6 +4,13 @@ import type { ExtractedPortfolioValue, MonthlyActivityParseResult, PortfolioValu
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from './manual-overrides';
 import { manualFieldMetadata, normalizeManualOverrideRecord } from './manual-overrides';
 
+export const appliedSuggestionSourceKinds: ReadonlySet<ManualValueSourceMetadata['source']> = new Set([
+  'codal-suggestion',
+  'codal-excel-manual-review',
+  'tsetmc-suggestion',
+  'financial-statement-suggestion'
+]);
+
 export interface SuggestionApplyContext {
   symbol: string;
   currentPriceSource: ManualOverrideRecord['currentPriceSource'];
@@ -123,10 +130,8 @@ export function resetCodalSuggestionFields(current: ManualOverrideRecord, resetA
   const fieldSources = { ...(current.fieldSources ?? {}) };
 
   for (const field of Object.keys(fieldSources) as Array<keyof NavInputs>) {
-    if (
-      fieldSources[field]?.source !== 'codal-suggestion' &&
-      fieldSources[field]?.source !== 'codal-excel-manual-review'
-    ) {
+    const source = fieldSources[field]?.source;
+    if (!source || !appliedSuggestionSourceKinds.has(source)) {
       continue;
     }
     if (field === 'currentPrice') {

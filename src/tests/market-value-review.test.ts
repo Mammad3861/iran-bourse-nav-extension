@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeNavCompleteness } from '../core/nav-calculator';
 import type { ExtractedPortfolioValue, MonthlyActivityParseResult } from '../data/codal-monthly-parser';
-import { manualReviewMarketValueCandidates } from '../data/market-value-review';
+import { manualReviewMarketValueCandidates, manualReviewMarketValueSummary } from '../data/market-value-review';
 import { applySuggestionToRecord, resetCodalSuggestionFields } from '../data/suggestion-application';
 
 function marketCandidate(overrides: Partial<ExtractedPortfolioValue> = {}): ExtractedPortfolioValue {
@@ -94,6 +94,27 @@ describe('manualReviewMarketValueCandidates', () => {
     });
 
     expect(manualReviewMarketValueCandidates(result([previous, current]))).toEqual([current]);
+  });
+
+  it('keeps reviewable market candidates visible when ranking score is missing', () => {
+    const candidate = marketCandidate({ rankingScore: undefined, confidence: 'low' });
+
+    expect(manualReviewMarketValueCandidates(result([candidate]))).toEqual([candidate]);
+  });
+
+  it('reports hidden candidate counts for the manual review UI', () => {
+    const good = marketCandidate();
+    const summary = manualReviewMarketValueSummary(
+      result([
+        good,
+        marketCandidate({ value: 0, rawValue: 0, rawText: '0' }),
+        marketCandidate({ rowLabel: 'شرکت نمونه', sourceRowIndex: 8 })
+      ])
+    );
+
+    expect(summary.visible).toEqual([good]);
+    expect(summary.totalCandidates).toBe(3);
+    expect(summary.hiddenCandidates).toBe(2);
   });
 
   it('applying a reviewed candidate stores manual-review metadata and does not complete NAV alone', () => {
