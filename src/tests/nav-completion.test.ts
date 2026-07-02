@@ -181,6 +181,106 @@ describe('NAV completion workflow model', () => {
 
     expect(summary.status).toBe('calculable-warning');
     expect(summary.navShareMissingFields).toEqual(expect.arrayContaining(['totalShares', 'currentPrice']));
+    expect(summary.navShareGuidance).toBe('برای NAV هر سهم، تعداد کل سهام لازم است.');
+  });
+
+  it('uses TSETMC label for legacy totalShares metadata in completion workflow', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: { totalShares: 9_000_000_000 },
+        fieldSources: {
+          totalShares: {
+            value: 9_000_000_000,
+            source: 'codal-suggestion',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            reportTitle: 'TSETMC instrument info',
+            columnLabel: 'zTitad / totalShares'
+          }
+        }
+      })
+    );
+
+    expect(summary.fields.find((field) => field.field === 'totalShares')?.statusLabel).toBe(
+      'اعمال‌شده از پیشنهاد TSETMC'
+    );
+  });
+
+  it('does not mark live/latest-trade current price as stale', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: { currentPrice: 17_070 },
+        currentPriceSource: 'dom-latest-trade'
+      })
+    );
+
+    expect(summary.fields.find((field) => field.field === 'currentPrice')?.statusLabel).toBe(
+      'خوانده‌شده از آخرین معامله / TSETMC'
+    );
+  });
+
+  it('marks current price stale only when metadata says stale', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: { currentPrice: 17_070 },
+        currentPriceSource: 'manual',
+        fieldSources: {
+          currentPrice: {
+            value: 17_070,
+            source: 'manual',
+            appliedAt: '2026-07-02T00:00:00.000Z',
+            stale: true
+          }
+        }
+      })
+    );
+
+    expect(summary.fields.find((field) => field.field === 'currentPrice')?.statusLabel).toBe(
+      'مقدار ذخیره‌شده قدیمی / stale'
+    );
+  });
+
+  it('explains share and P/NAV wait for NAV total when shares and price are present', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: {
+          totalShares: 9_000_000_000,
+          currentPrice: 17_070
+        },
+        currentPriceSource: 'dom-latest-trade'
+      })
+    );
+
+    expect(summary.navShareGuidance).toBe(
+      'تعداد سهام و قیمت فعلی موجود است؛ بعد از تکمیل NAV کل، NAV هر سهم و P/NAV قابل محاسبه می‌شود.'
+    );
+  });
+
+  it('says NAV/share and P/NAV are calculable only after NAV total is complete', () => {
+    const summary = buildNavCompletionSummary(
+      record({
+        inputs: {
+          equity: 100,
+          listedPortfolioMarketValue: 500,
+          listedPortfolioCostValue: 400,
+          unlistedPortfolioSurplus: 0,
+          totalShares: 10,
+          currentPrice: 20
+        },
+        currentPriceSource: 'dom-latest-trade',
+        fieldSources: {
+          equity: { value: 100, source: 'manual', appliedAt: '2026-07-02T00:00:00.000Z' },
+          listedPortfolioMarketValue: { value: 500, source: 'manual', appliedAt: '2026-07-02T00:00:00.000Z' },
+          listedPortfolioCostValue: { value: 400, source: 'manual', appliedAt: '2026-07-02T00:00:00.000Z' },
+          unlistedPortfolioSurplus: {
+            value: 0,
+            source: 'user-confirmed-zero',
+            appliedAt: '2026-07-02T00:00:00.000Z'
+          }
+        }
+      })
+    );
+
+    expect(summary.navShareGuidance).toBe('NAV هر سهم و P/NAV قابل محاسبه است.');
   });
 
   it('reports cost/market pair warnings', () => {

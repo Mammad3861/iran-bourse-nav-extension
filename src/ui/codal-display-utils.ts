@@ -102,7 +102,7 @@ export function financialReportSummary(report: CodalReportReference | undefined)
 export function financialReportDiscoverySummary(result: CodalReportDiscoveryResult): string {
   if (result.financialStatementReport) return financialReportSummary(result.financialStatementReport);
   if (result.status === 'stale-cache' && result.diagnostics?.financialStatement?.selectedConfidence === 'none') {
-    return `بررسی زنده ناموفق بود؛ آخرین نتیجه ذخیره‌شده: ${financialReportSummary(undefined)}`;
+    return `بررسی زنده صورت مالی ناموفق بود؛ آخرین نتیجه ذخیره‌شده: ${financialReportSummary(undefined)}`;
   }
   if (result.status === 'not-found') return financialReportSummary(undefined);
   if (result.status === 'stale-cache') return 'نمایش از داده ذخیره‌شده قدیمی';

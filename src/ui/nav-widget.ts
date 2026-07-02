@@ -938,9 +938,7 @@ function updateCompletionWorkflow(
   summaryText.className = 'ibnav-muted';
   summaryText.textContent = [
     summary.summaryText,
-    summary.navShareMissingFields.length
-      ? `برای NAV هر سهم و P/NAV، ${summary.navShareMissingFields.map((field) => navCompletionFieldLabels[field]).join('، ')} هم باید وارد شده باشد.`
-      : 'NAV هر سهم و P/NAV با ورودی‌های فعلی قابل بررسی است.'
+    summary.navShareGuidance
   ].join(' ');
   container.appendChild(summaryText);
 

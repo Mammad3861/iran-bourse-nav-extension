@@ -117,6 +117,19 @@ describe('manualReviewMarketValueCandidates', () => {
     expect(summary.hiddenCandidates).toBe(2);
   });
 
+  it('reports no visible candidates when all market candidates are filtered out', () => {
+    const summary = manualReviewMarketValueSummary(
+      result([
+        marketCandidate({ value: 0, rawValue: 0, rawText: '0' }),
+        marketCandidate({ rowLabel: 'شرکت نمونه', sourceRowIndex: 8 })
+      ])
+    );
+
+    expect(summary.visible).toEqual([]);
+    expect(summary.totalCandidates).toBe(2);
+    expect(summary.hiddenCandidates).toBe(2);
+  });
+
   it('applying a reviewed candidate stores manual-review metadata and does not complete NAV alone', () => {
     const candidate = marketCandidate();
     const applied = applySuggestionToRecord(undefined, candidate, {
