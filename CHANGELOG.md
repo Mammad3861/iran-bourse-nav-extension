@@ -1,0 +1,47 @@
+# Changelog
+
+## 0.1.0-alpha.1
+
+Internal alpha release for manual testing. This is not a public or Chrome Web Store release.
+
+### Added
+
+- Manual local NAV and P/NAV calculator with Persian RTL UI.
+- Per-symbol local storage in `chrome.storage.local`.
+- TSETMC symbol, InsCode, current price, and basic instrument detection.
+- TSETMC latest-trade current price extraction with manual fallback.
+- TSETMC total shares suggestion when instrument info exposes a reliable value.
+- Codal report discovery through the MV3 background/service worker.
+- Defensive Codal report selection with issuer/symbol matching and subsidiary-report rejection.
+- Codal monthly activity report detail fetching and table detection.
+- Codal cell-model table reconstruction for supported report shapes.
+- Limited Codal monthly parser for listed portfolio cost and related candidate values.
+- ExcelUrl fetching through the background/service worker when available.
+- Excel manual-review market-value candidates for ambiguous listed portfolio market value.
+- Conservative financial statement parsing foundation for equity suggestions.
+- Guided NAV completion workflow for missing fields, applied suggestions, reviewed values, and explicit zero confirmation.
+- Smoke Test Summary with compact diagnostics for symbol, price, report selection, candidates, completion, live/cache state, and parser data status.
+- Holding/non-holding classification for internal smoke symbols such as `وصندوق`, `شستا`, `فولاد`, and `فملی`.
+- Stale-cache and network status reporting for Codal discovery/parser failures.
+- Copyable parser/report-selection/connection diagnostics.
+- Manifest/content-script validation scripts.
+
+### Safety Model
+
+- Manual inputs remain the source of truth.
+- Codal/TSETMC/Excel values are suggestions only.
+- No suggestion is auto-applied.
+- Low-confidence or ambiguous values require explicit manual review.
+- Market value candidates from Excel are not treated as reliable primary values unless the user confirms one.
+- Suspicious subsidiary/other-company financial reports are excluded from the main issuer-level financial report slot.
+
+### Known Limitations
+
+- Internal alpha only; not a public/store release.
+- NAV output is a local estimate and not investment advice.
+- Codal and TSETMC endpoints are unofficial/unstable and may fail or change shape.
+- Excel resources may be unavailable, blocked, noisy, or ambiguous.
+- Financial statement values may be consolidated, standalone, unaudited, restated, or unsuitable without review.
+- Non-holding symbols may show only basic info and the manual calculator.
+- Stale cache can preserve prior candidates during network failures, but stale data must be manually reviewed.
+- Users must verify units, periods, issuer identity, row/column labels, and report context manually.

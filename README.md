@@ -114,10 +114,14 @@ Values copied from Codal, Excel, financial statements, or TSETMC are still sugge
 
 ## Current Smoke-Test Status
 
+Internal alpha release label: `0.1.0-alpha.1`.
+Chrome manifest version: `0.1.0`.
+
+Chrome requires a numeric manifest version, so prerelease labels are kept in `package.json` and release/package names, not in `manifest.json`. See [docs/release-checklist.md](docs/release-checklist.md) for the internal alpha packaging workflow.
+
 Limited public smoke testing on 2026-06-28 verified that:
 
-* Lint, unit tests, and TypeScript checks pass locally.
-* A production `dist/` build was generated earlier in the smoke-test session; the final automated rebuild was blocked by a local OS access-denied error while overwriting generated files.
+* Lint, unit tests, TypeScript checks, build, manifest validation, and content-script validation pass locally.
 * Public TSETMC `/instInfo/{InsCode}` pages for sample investment/holding symbols expose ticker/header and latest/closing price text that can be parsed defensively.
 * Public Codal search returns metadata for sample symbols, but may require Persian/Arabic ticker spelling variants.
 * Codal `Length` is treated as a period filter, not a page-size limit; the client keeps it at `-1`.
@@ -132,6 +136,7 @@ Limited public smoke testing on 2026-06-28 verified that:
 * Incomplete NAV is not shown as a final numeric estimate; NAV total, NAV/share, and P/NAV remain unavailable until required fields are provided.
 * Codal resources can load differently depending on network routing or VPN state; failures should remain visible in diagnostics and leave the manual calculator usable.
 * If live Codal discovery fails, the extension distinguishes connection errors from true `not found` results. When a previous successful discovery exists, it may show stale cached Codal metadata with a clear stale warning; cached suggestions still require manual review and are never auto-applied.
+* Smoke Summary distinguishes `live`, `stale-cache`, and `unavailable-network-error` parser states so network failures do not look like true no-candidate results.
 * Chrome automation could not open `chrome://extensions/`, so final unpacked-extension loading from `dist/` must be checked manually in Chrome.
 
 ## Development

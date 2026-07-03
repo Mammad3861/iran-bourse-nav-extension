@@ -1,7 +1,17 @@
 # Limitations
 
-This extension provides an estimate, not an audited valuation.
+This extension is an internal alpha testing tool. It provides a local estimate, not an audited valuation, recommendation, or investment advice.
 
+- This alpha is not a public/store release and should be used only for manual testing.
+- NAV output is only a local estimate based on user-reviewed inputs.
+- Manual inputs are the source of truth for calculations.
+- Codal, TSETMC, and Excel parsing is best-effort and can be wrong, stale, unavailable, or shaped differently by network/VPN state.
+- Codal/TSETMC/Excel values are suggestions only and require manual review before the user applies them.
+- Excel market-value candidates are especially ambiguous; users must verify row labels, column labels, units, periods, and issuer/report context manually.
+- Financial statements may be consolidated, standalone, unaudited, restated, subsidiary-level, or otherwise unsuitable for issuer-level NAV without review.
+- Non-holding symbols may show only basic TSETMC info and the manual calculator.
+- Network failures may use stale cached Codal/parser summaries; stale data is not fresh evidence.
+- Users must verify units and periods manually before relying on any suggestion.
 - User-entered financial statement inputs may be stale, incomplete, or incorrect.
 - TSETMC page structure can change without notice, so symbol and price detection may fail.
 - Current price may need manual entry when the page does not expose a reliable value.
