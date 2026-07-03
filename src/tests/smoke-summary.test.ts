@@ -297,6 +297,84 @@ describe('smoke summary', () => {
     });
   });
 
+  it('keeps stale cached parser candidates visible in smoke summaries', () => {
+    const parsed = parseResult();
+    parsed.diagnostics.parserDataStatus = 'stale-cache';
+    parsed.diagnostics.staleParsedCacheUsed = true;
+    parsed.diagnostics.parsedCacheCachedAt = '2026-07-02T00:00:00.000Z';
+    parsed.diagnostics.candidateAvailability = 'stale-candidates';
+    const staleDiscovery = discovery();
+    staleDiscovery.status = 'stale-cache';
+    staleDiscovery.usedCache = true;
+    staleDiscovery.stale = true;
+    staleDiscovery.cachedAt = '2026-07-02T00:00:00.000Z';
+    staleDiscovery.errorStatus = 'network-error';
+    staleDiscovery.errorMessage = 'Codal search failed after 3 attempt(s): Failed to fetch';
+    staleDiscovery.diagnostics!.liveFetch = {
+      status: 'network-error',
+      usedCache: true,
+      cachedAt: '2026-07-02T00:00:00.000Z',
+      attemptCount: 3,
+      domain: 'search.codal.ir',
+      errorMessage: 'Failed to fetch'
+    };
+
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      discovery: staleDiscovery,
+      parseResult: parsed,
+      support: {
+        status: 'likely-holding',
+        reasons: ['نام ابزار شبیه شرکت سرمایه‌گذاری/هلدینگ است.']
+      }
+    });
+
+    expect(summary).toMatchObject({
+      codalDiscoveryStatus: 'stale-cache',
+      parserDataStatus: 'stale-cache',
+      staleParsedCacheUsed: true,
+      parsedCacheCachedAt: '2026-07-02T00:00:00.000Z',
+      codalLiveFetchStatus: 'network-error',
+      codalLiveFetchError: 'Failed to fetch',
+      candidateAvailability: 'stale-candidates',
+      extractedCandidates: [expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 136_494_769 })]
+    });
+    expect((summary.userFacingWarnings as string[]).join(' ')).toContain('آخرین نتیجه ذخیره‌شده');
+  });
+
+  it('marks network failures without parsed cache as unavailable, not none-found-live', () => {
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      discovery: {
+        status: 'network-error',
+        symbol: 'وصندوق',
+        errorStatus: 'network-error',
+        errorMessage: 'Codal search failed after 3 attempt(s): Failed to fetch',
+        sourceVerified: false,
+        checkedAt: '2026-07-03T00:00:00.000Z',
+        diagnostics: {
+          requestedSymbol: 'وصندوق',
+          liveFetch: {
+            status: 'network-error',
+            errorMessage: 'Failed to fetch',
+            attemptCount: 3,
+            domain: 'search.codal.ir',
+            usedCache: false
+          }
+        }
+      }
+    });
+
+    expect(summary).toMatchObject({
+      parserDataStatus: 'unavailable-network-error',
+      candidateAvailability: 'unavailable',
+      extractedCandidates: []
+    });
+    expect((summary.userFacingWarnings as string[]).join(' ')).toContain('کاندیدهای کدال بررسی نشدند');
+  });
+
   it('marks subsidiary financial reports as issuer mismatch in smoke summaries', () => {
     const summary = createSmokeSummary({
       symbol: 'فولاد',

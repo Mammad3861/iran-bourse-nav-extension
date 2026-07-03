@@ -15,6 +15,13 @@ import {
   type MonthlyActivityParseResult
 } from '../data/codal-monthly-parser';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
+import {
+  createUnavailableNetworkParseResult,
+  getParsedCodalSummary,
+  parseResultFromParsedCache,
+  parserDataStatusFor,
+  saveParsedCodalSummary
+} from '../data/codal-parsed-cache';
 import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
 import {
   codalDiscoveryDiagnosticsJson,
@@ -242,6 +249,10 @@ function markParseResultStale(result: MonthlyActivityParseResult, cachedAt?: str
     diagnostics: {
       ...result.diagnostics,
       parserStatus: 'ambiguous',
+      parserDataStatus: 'stale-cache',
+      staleParsedCacheUsed: true,
+      parsedCacheCachedAt: cachedAt,
+      candidateAvailability: 'stale-candidates',
       parserWarnings: [...new Set([...result.diagnostics.parserWarnings, staleWarning])],
       extractedCandidates: result.diagnostics.extractedCandidates.map(markValue)
     }
@@ -552,6 +563,19 @@ async function renderPopup(): Promise<void> {
 
   const codalResult = await requestCodalDiscovery(codalSymbolValidation.symbol);
   renderCodalDiscovery(codalResult);
+  const renderCachedOrUnavailableParse = async (reason?: string): Promise<void> => {
+    const cached = await getParsedCodalSummary(codalSymbolValidation.symbol);
+    renderMonthlySuggestions(
+      cached
+        ? markParseResultStale(parseResultFromParsedCache(cached), cached.cachedAt)
+        : createUnavailableNetworkParseResult({
+            symbol,
+            codalSymbol: codalSymbolValidation.symbol,
+            reportTitle: codalResult.monthlyActivityReport?.title,
+            warning: reason
+          })
+    );
+  };
   const reports = [codalResult.monthlyActivityReport, codalResult.financialStatementReport].filter(
     (report): report is CodalReportReference => Boolean(report)
   );
@@ -563,6 +587,9 @@ async function renderPopup(): Promise<void> {
           : 'unavailable',
       errorMessage: codalResult.errorMessage
     });
+    if (parserDataStatusFor({ discovery: codalResult }) === 'unavailable-network-error') {
+      await renderCachedOrUnavailableParse(codalResult.errorMessage);
+    }
     return;
   }
 
@@ -589,7 +616,18 @@ async function renderPopup(): Promise<void> {
 
   if (parseResults.length > 0) {
     const mergedResult = mergeMonthlyActivityParseResults(parseResults);
-    renderMonthlySuggestions(codalResult.status === 'stale-cache' ? markParseResultStale(mergedResult, codalResult.cachedAt) : mergedResult);
+    const nextResult = codalResult.status === 'stale-cache' ? markParseResultStale(mergedResult, codalResult.cachedAt) : mergedResult;
+    if (codalResult.status !== 'stale-cache') {
+      await saveParsedCodalSummary({
+        symbol,
+        codalSymbol: codalSymbolValidation.symbol,
+        discovery: codalResult,
+        parseResult: nextResult
+      });
+    }
+    renderMonthlySuggestions(nextResult);
+  } else if (parserDataStatusFor({ discovery: codalResult }) === 'unavailable-network-error' || codalResult.status === 'stale-cache') {
+    await renderCachedOrUnavailableParse(codalResult.errorMessage);
   }
 }
 

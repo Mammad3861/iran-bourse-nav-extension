@@ -16,6 +16,14 @@ import {
   type MonthlyActivityParseResult
 } from '../data/codal-monthly-parser';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
+import {
+  createUnavailableNetworkParseResult,
+  getParsedCodalSummary,
+  markParseResultStale,
+  parseResultFromParsedCache,
+  parserDataStatusFor,
+  saveParsedCodalSummary
+} from '../data/codal-parsed-cache';
 import { requestCodalDiscovery, requestCodalReportDetail } from '../data/codal-transport';
 import { manualReviewMarketValueSummary } from '../data/market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from '../data/manual-overrides';
@@ -437,31 +445,6 @@ function tsetmcTotalSharesParseResult(value: number, options: NavWidgetOptions):
     },
     warnings: ['تعداد کل سهام از TSETMC پیشنهاد شده است و به‌تنهایی NAV را کامل نمی‌کند.'],
     parsedAt
-  };
-}
-
-function markParseResultStale(result: MonthlyActivityParseResult, cachedAt?: string): MonthlyActivityParseResult {
-  const staleWarning = cachedAt
-    ? `این پیشنهاد از داده ذخیره‌شده قدیمی کدال است (${formatPersianTimestamp(new Date(cachedAt))}) و نیازمند بررسی دستی است.`
-    : 'این پیشنهاد از داده ذخیره‌شده قدیمی کدال است و نیازمند بررسی دستی است.';
-  const markValue = (value: ExtractedPortfolioValue): ExtractedPortfolioValue => ({
-    ...value,
-    confidence: 'low',
-    warning: value.warning ? `${value.warning} ${staleWarning}` : staleWarning
-  });
-  return {
-    ...result,
-    status: 'ambiguous',
-    extractedValues: result.extractedValues.map(markValue),
-    primarySuggestions: result.primarySuggestions.map(markValue),
-    secondarySuggestions: result.secondarySuggestions.map(markValue),
-    warnings: [...new Set([...result.warnings, staleWarning])],
-    diagnostics: {
-      ...result.diagnostics,
-      parserStatus: 'ambiguous',
-      parserWarnings: [...new Set([...result.diagnostics.parserWarnings, staleWarning])],
-      extractedCandidates: result.diagnostics.extractedCandidates.map(markValue)
-    }
   };
 }
 
@@ -1301,6 +1284,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <div class="ibnav-row"><span>صورت مالی</span><span data-ibnav-codal="financial">-</span></div>
         <a class="ibnav-link" data-ibnav-codal-link="financial" target="_blank" rel="noreferrer" hidden>مشاهده صورت مالی</a>
         <div data-ibnav-codal="diagnostics"></div>
+        <button type="button" class="ibnav-save ibnav-secondary" data-ibnav-codal-connection-copy>کپی وضعیت اتصال کدال</button>
         <button type="button" class="ibnav-save ibnav-secondary" data-ibnav-smoke-copy>کپی خلاصه Smoke Test</button>
         <div class="ibnav-row"><span>جزئیات آخرین گزارش</span><span data-ibnav-codal-detail="status">در انتظار نتیجه جستجو</span></div>
         <div class="ibnav-row"><span>زمان دریافت جزئیات</span><span data-ibnav-codal-detail="fetchedAt">-</span></div>
@@ -1330,6 +1314,29 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   }, latestParseResult, latestSupport);
   const codalSymbolValidation = validateCodalSearchSymbol(options.codalSymbol ?? options.symbol);
   const loadCodalDiscovery = async (): Promise<void> => {
+    const renderCachedOrUnavailableParse = async (discovery: CodalReportDiscoveryResult, reason?: string): Promise<void> => {
+      const cached = await getParsedCodalSummary(codalSymbolValidation.symbol ?? options.codalSymbol ?? options.symbol);
+      latestParseResult = cached
+        ? markParseResultStale(parseResultFromParsedCache(cached), cached.cachedAt)
+        : createUnavailableNetworkParseResult({
+            symbol: options.symbol,
+            codalSymbol: options.codalSymbol,
+            reportTitle: discovery.monthlyActivityReport?.title,
+            warning: reason
+          });
+      latestSupport = classifyHoldingSupport({
+        instrumentName: options.instrumentName,
+        discovery,
+        parseResult: latestParseResult
+      });
+      renderMonthlySuggestions(root, latestParseResult, options, () => activeRecord, (record) => {
+        activeRecord = record;
+      }, latestSupport);
+      updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
+        activeRecord = record;
+      }, latestParseResult, latestSupport);
+    };
+
     if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
       renderCodalDiscovery(root, {
         status: 'not-found',
@@ -1359,6 +1366,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           status: result.status === 'network-error' || result.status === 'cors-blocked' || result.status === 'parse-error' ? 'network-error' : 'unavailable',
           errorMessage: result.errorMessage
         });
+        if (parserDataStatusFor({ discovery: result }) === 'unavailable-network-error') {
+          await renderCachedOrUnavailableParse(result);
+        }
         updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
           activeRecord = record;
         }, latestParseResult, latestSupport);
@@ -1399,6 +1409,14 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         }
           const mergedResult = mergeMonthlyActivityParseResults(parseResults);
           latestParseResult = result.status === 'stale-cache' ? markParseResultStale(mergedResult, result.cachedAt) : mergedResult;
+          if (result.status !== 'stale-cache') {
+            await saveParsedCodalSummary({
+              symbol: options.symbol,
+              codalSymbol: codalSymbolValidation.symbol,
+              discovery: result,
+              parseResult: latestParseResult
+            });
+          }
           latestSupport = classifyHoldingSupport({
             instrumentName: options.instrumentName,
             discovery: result,
@@ -1410,6 +1428,8 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
             activeRecord = record;
           }, latestParseResult, latestSupport);
+      } else if (parserDataStatusFor({ discovery: result }) === 'unavailable-network-error' || result.status === 'stale-cache') {
+        await renderCachedOrUnavailableParse(result);
       }
     } catch (error: unknown) {
       if (!isActiveWidgetRender(root, renderId)) return;
@@ -1431,11 +1451,36 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         status: 'network-error',
         errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت جزئیات کدال'
       });
+      await renderCachedOrUnavailableParse(latestDiscoveryResult, error instanceof Error ? error.message : undefined);
     }
   };
 
   root.querySelector<HTMLButtonElement>('[data-ibnav-codal="retry"]')?.addEventListener('click', () => {
     void loadCodalDiscovery();
+  });
+
+  root.querySelector<HTMLButtonElement>('[data-ibnav-codal-connection-copy]')?.addEventListener('click', async () => {
+    const payload = JSON.stringify(
+      {
+        domain: latestDiscoveryResult?.domain ?? latestDiscoveryResult?.diagnostics?.liveFetch?.domain ?? ['search', 'codal', 'ir'].join('.'),
+        liveFetch: latestDiscoveryResult?.diagnostics?.liveFetch,
+        usedCache: latestDiscoveryResult?.usedCache,
+        cachedAt: latestDiscoveryResult?.cachedAt,
+        attemptCount: latestDiscoveryResult?.attemptCount ?? latestDiscoveryResult?.diagnostics?.liveFetch?.attemptCount,
+        parserDataStatus: parserDataStatusFor({ discovery: latestDiscoveryResult, parseResult: latestParseResult }),
+        staleParsedCacheUsed: latestParseResult?.diagnostics.staleParsedCacheUsed ?? false
+      },
+      null,
+      2
+    );
+    const fallbackContainer =
+      root.querySelector<HTMLElement>('[data-ibnav-codal="diagnostics"]') ??
+      root.querySelector<HTMLElement>('[data-ibnav-completion]') ??
+      root;
+    const outcome = await copyTextWithFallback(payload, window.navigator.clipboard, (text) =>
+      showManualCopyFallback(fallbackContainer, text)
+    );
+    setApplyStatus(root, outcome === 'copied' ? 'وضعیت اتصال کدال کپی شد.' : 'متن وضعیت اتصال برای کپی دستی نمایش داده شد.');
   });
 
   root.querySelector<HTMLButtonElement>('[data-ibnav-smoke-copy]')?.addEventListener('click', async () => {

@@ -1,6 +1,11 @@
 import type { NavInputs } from '../core/nav-calculator';
 import type { CodalReportDiscoveryResult, CodalReportSelectionCandidate, CodalReportSelectionDiagnostics } from './codal-client';
 import type { ExtractedPortfolioValue, MonthlyActivityParseResult } from './codal-monthly-parser';
+import {
+  candidateAvailabilityForSmoke,
+  parsedCacheWarnings,
+  parserDataStatusFor
+} from './codal-parsed-cache';
 import { manualReviewMarketValueSummary } from './market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceKind } from './manual-overrides';
 import type { NavCompletionSummary } from './nav-completion';
@@ -125,6 +130,11 @@ function financialReportSummary(
 
 export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unknown> {
   const monthly = input.discovery?.diagnostics?.monthlyActivity;
+  const parserDataStatus = parserDataStatusFor({ discovery: input.discovery, parseResult: input.parseResult });
+  const candidateAvailability = candidateAvailabilityForSmoke({
+    discovery: input.discovery,
+    parseResult: input.parseResult
+  });
   const marketReview = input.parseResult ? manualReviewMarketValueSummary(input.parseResult) : undefined;
   const marketReviewRejectedCandidateCount =
     input.parseResult?.diagnostics.rejectedCandidates.filter(
@@ -145,6 +155,12 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     totalShares: input.record?.inputs.totalShares,
     totalSharesSource: normalizedSourceFor(input.record, 'totalShares'),
     codalDiscoveryStatus: input.discovery?.status,
+    parserDataStatus,
+    staleParsedCacheUsed: input.parseResult?.diagnostics.staleParsedCacheUsed ?? false,
+    parsedCacheCachedAt: input.parseResult?.diagnostics.parsedCacheCachedAt,
+    codalLiveFetchStatus: input.discovery?.diagnostics?.liveFetch?.status,
+    codalLiveFetchError: input.discovery?.diagnostics?.liveFetch?.errorMessage ?? input.discovery?.errorMessage,
+    candidateAvailability,
     fetchCacheStatus: {
       usedCache: input.discovery?.usedCache,
       stale: input.discovery?.stale,
@@ -171,6 +187,8 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     missingFields: input.navCompletion?.navTotalMissingFields ?? [],
     navShareMissingFields: input.navCompletion?.navShareMissingFields ?? [],
     userFacingWarnings: [
+      ...(parserDataStatus === 'stale-cache' ? [parsedCacheWarnings.stale] : []),
+      ...(parserDataStatus === 'unavailable-network-error' ? [parsedCacheWarnings.unavailableNetwork] : []),
       ...(input.parseResult?.warnings.slice(0, 8) ?? []),
       ...((input.support?.status === 'unsupported' || input.support?.status === 'unknown') &&
       !input.discovery?.financialStatementReport

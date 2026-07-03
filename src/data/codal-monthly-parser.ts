@@ -123,6 +123,10 @@ export interface MonthlyActivityParserDiagnostics {
   fetchTimestamp?: string;
   detectedTableCount: number;
   parserStatus: MonthlyActivityParseResult['status'];
+  parserDataStatus?: 'live' | 'stale-cache' | 'unavailable-network-error';
+  staleParsedCacheUsed?: boolean;
+  parsedCacheCachedAt?: string;
+  candidateAvailability?: 'live-candidates' | 'stale-candidates' | 'unavailable' | 'none-found-live';
   parserWarnings: string[];
   extractedCandidates: ExtractedPortfolioValue[];
   rejectedCandidates: ParserRejectedCandidate[];

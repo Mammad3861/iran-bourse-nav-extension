@@ -13,6 +13,10 @@ This extension provides an estimate, not an audited valuation.
 - Codal discovery may fail because of endpoint changes, browser/network blocking, rate limits, or unexpected response shapes.
 - Codal discovery failure is different from a successful `not found` result. On network, VPN, filtering, CORS, or temporary service failures, the UI should say the connection/check failed instead of showing report slots as `یافت نشد`.
 - If a previous successful Codal discovery exists for the symbol, the extension may show it as stale cached data. Stale Codal suggestions are downgraded for manual review and are never auto-applied.
+- If a previous successful parser run exists, the extension may show a compact stale parsed summary with `parserDataStatus: "stale-cache"`. This preserves candidate visibility during temporary network failures, but values are stale and still require manual review.
+- If live Codal fetch fails and no parsed summary cache exists, the extension marks parser data as `unavailable-network-error`. Empty candidates in this state mean the parser could not check Codal, not that Codal contains no candidates.
+- The Codal retry action only retries live discovery/detail/Excel checks and clears transient fetch error display. It must not clear manual inputs, applied suggestions, or local project files.
+- The Codal connection debug copy action emits compact status metadata only, such as domain, live fetch status, cache use, attempt count, parser data status, and stale-cache usage. It does not copy raw Codal payloads.
 - Failed live Codal responses must not overwrite the last successful cached discovery or any manual/applied NAV inputs.
 - Codal requests run through the extension background service worker. If the service worker is unavailable, asleep, or missing host permissions, the UI shows a safe warning and the manual calculator remains usable.
 - Invalid detected symbols such as `TSETMC`, `InsCode:*`, `نماد نامشخص`, URLs, domains, or numeric-only values are intentionally not searched in Codal.
