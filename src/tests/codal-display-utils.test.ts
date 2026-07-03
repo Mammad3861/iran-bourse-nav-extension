@@ -190,4 +190,48 @@ describe('codal display utilities', () => {
       'بررسی زنده صورت مالی ناموفق بود؛ آخرین نتیجه ذخیره‌شده: صورت مالی معتبر برای ناشر پیدا نشد'
     );
   });
+
+  it('renders issuer-mismatch financial diagnostics instead of a network error', () => {
+    const result: CodalReportDiscoveryResult = {
+      status: 'found',
+      symbol: 'وغدیر',
+      sourceVerified: false,
+      checkedAt: '2026-07-01T00:00:00.000Z',
+      diagnostics: {
+        requestedSymbol: 'وغدیر',
+        financialStatement: {
+          requestedSymbol: 'وغدیر',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'none',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: {
+                symbol: 'وغدیر',
+                title: 'اطلاعات و صورت‌های مالی (شرکت ایران مارین سرویسز)'
+              },
+              score: -75,
+              selected: false,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.']
+            }
+          ]
+        }
+      }
+    };
+
+    expect(financialReportDiscoverySummary(result)).toBe('گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد');
+  });
+
+  it('keeps real network financial failures as network failures when no resolved diagnostics exist', () => {
+    const result: CodalReportDiscoveryResult = {
+      status: 'network-error',
+      symbol: 'وغدیر',
+      sourceVerified: false,
+      checkedAt: '2026-07-01T00:00:00.000Z'
+    };
+
+    expect(financialReportDiscoverySummary(result)).toBe('به‌دلیل خطای اتصال بررسی نشد');
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExtractedPortfolioValue } from '../data/codal-monthly-parser';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
+import { resetCodalSuggestionFields } from '../data/suggestion-application';
 import {
   appliedSourceLabel,
   appliedSuggestionMessage,
@@ -90,6 +91,38 @@ describe('suggestion UI utilities', () => {
     expect(isSuggestionAlreadyApplied(record, suggestion, 'tsetmc-suggestion')).toBe(true);
     expect(isSuggestionAlreadyApplied(record, { ...suggestion, value: 8_000_000_000 }, 'tsetmc-suggestion')).toBe(false);
     expect(isSuggestionAlreadyApplied(record, suggestion, 'codal-suggestion')).toBe(false);
+  });
+
+  it('recalculates candidate state as empty after applied suggestions are reset', () => {
+    const suggestion = totalSharesSuggestion();
+    const record: ManualOverrideRecord = {
+      symbol: 'وغدیر',
+      inputs: {
+        totalShares: 9_000_000_000,
+        unlistedPortfolioSurplus: 0
+      },
+      currentPriceSource: 'manual',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+      fieldSources: {
+        totalShares: {
+          value: 9_000_000_000,
+          source: 'tsetmc-suggestion',
+          appliedAt: '2026-07-01T00:00:00.000Z'
+        },
+        unlistedPortfolioSurplus: {
+          value: 0,
+          source: 'user-confirmed-zero',
+          appliedAt: '2026-07-01T00:00:00.000Z',
+          reviewedByUser: true
+        }
+      }
+    };
+
+    expect(candidateApplyState(record, suggestion, 'tsetmc-suggestion')).toBe('exact-applied');
+    const reset = resetCodalSuggestionFields(record, '2026-07-01T01:00:00.000Z');
+    expect(reset.inputs.totalShares).toBeUndefined();
+    expect(reset.inputs.unlistedPortfolioSurplus).toBe(0);
+    expect(candidateApplyState(reset, suggestion, 'tsetmc-suggestion')).toBe('empty');
   });
 
   it('does not mark manually entered values as applied suggestions', () => {

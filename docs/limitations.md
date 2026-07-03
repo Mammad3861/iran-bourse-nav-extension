@@ -25,6 +25,7 @@ This extension is an internal alpha testing tool. It provides a local estimate, 
 - If a previous successful Codal discovery exists for the symbol, the extension may show it as stale cached data. Stale Codal suggestions are downgraded for manual review and are never auto-applied.
 - If a previous successful parser run exists, the extension may show a compact stale parsed summary with `parserDataStatus: "stale-cache"`. This preserves candidate visibility during temporary network failures, but values are stale and still require manual review.
 - If live Codal fetch fails and no parsed summary cache exists, the extension marks parser data as `unavailable-network-error`. Empty candidates in this state mean the parser could not check Codal, not that Codal contains no candidates.
+- Candidate availability separates `live-nav-candidates` from `live-basic-candidates-only`; a total-share suggestion alone is not treated as a NAV portfolio/equity candidate.
 - The Codal retry action only retries live discovery/detail/Excel checks and clears transient fetch error display. It must not clear manual inputs, applied suggestions, or local project files.
 - The Codal connection debug copy action emits compact status metadata only, such as domain, live fetch status, cache use, attempt count, parser data status, and stale-cache usage. It does not copy raw Codal payloads.
 - Failed live Codal responses must not overwrite the last successful cached discovery or any manual/applied NAV inputs.
@@ -51,6 +52,7 @@ This extension is an internal alpha testing tool. It provides a local estimate, 
 - Parser diagnostics expose raw and normalized previews of public Codal table content to help review labels, row alignment, and candidate values; the preview is not proof that the extracted value is correct.
 - Parser diagnostics are visible in the widget/popup and can be copied as JSON or compact Markdown/text table-preview output. If browser clipboard access is unavailable, the extension shows a textarea fallback for manual copy.
 - Diagnostics include public Codal report metadata, report-selection diagnostics, detected raw/normalized table headers, first raw/normalized rows, Codal cell-model reconstruction metadata when available, candidate labels, rejected candidates, and failure reasons. They do not include manual NAV inputs.
+- Diagnostics can contain long report titles, URLs, JSON-like text, and table rows; the UI should contain this text inside the widget with wrapping or local scrolling rather than widening the host page.
 - Numeric extraction prefers clear total rows such as `جمع`, `جمع کل`, `مجموع`, and `مانده پایان دوره`. Multiple total rows, duplicate candidates, or unclear labels are intentionally downgraded.
 - For reconstructed investment tables with multi-row headers, the parser prefers columns matching the report period and rejects prior-year columns from the main current-period suggestion. Zero aggregate candidates are rejected when a non-zero aggregate candidate exists.
 - The parser recognizes explicit unit hints such as `ریال`, `هزار ریال`, `میلیون ریال`, and `میلیون تومان`. If the unit is unclear, it keeps the raw value, adds a warning, and avoids high-confidence bulk apply.
@@ -68,6 +70,7 @@ This extension is an internal alpha testing tool. It provides a local estimate, 
 - Incomplete NAV is not shown as a final numeric estimate. NAV total, NAV/share, and P/NAV remain unavailable until required inputs are present.
 - Applying all suggestions only applies high-confidence, mappable fields. Low-confidence and ambiguous values require individual review.
 - Manually reviewed Excel market values are stored with `codal-excel-manual-review` metadata and can be reset like other Codal-applied values. They never auto-apply and do not complete NAV unless all required manual fields are present.
+- Resetting applied suggestions clears only suggestion-applied values and metadata, then rerenders candidate cards immediately. User-confirmed zero values are preserved.
 - Codal resources may load differently with VPN on/off or other network routing changes. The extension should fail gracefully, keep diagnostics visible, and leave the manual calculator usable.
 - Source metadata is an audit aid, not proof that a parsed value is correct.
 - The TSETMC widget reuses a stable root element to avoid duplicate NAV widgets and duplicate disclaimers during rerenders. Some unusual client-side navigation behavior on TSETMC may still require a manual page reload if the host page replaces major DOM sections unexpectedly.

@@ -126,7 +126,12 @@ export interface MonthlyActivityParserDiagnostics {
   parserDataStatus?: 'live' | 'stale-cache' | 'unavailable-network-error';
   staleParsedCacheUsed?: boolean;
   parsedCacheCachedAt?: string;
-  candidateAvailability?: 'live-candidates' | 'stale-candidates' | 'unavailable' | 'none-found-live';
+  candidateAvailability?:
+    | 'live-nav-candidates'
+    | 'live-basic-candidates-only'
+    | 'no-nav-candidates-live'
+    | 'stale-candidates'
+    | 'unavailable-network-error';
   parserWarnings: string[];
   extractedCandidates: ExtractedPortfolioValue[];
   rejectedCandidates: ParserRejectedCandidate[];

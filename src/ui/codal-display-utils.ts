@@ -113,11 +113,27 @@ export function financialReportSummary(report: CodalReportReference | undefined)
   return report ? reportSummary(report) : 'صورت مالی معتبر برای ناشر پیدا نشد';
 }
 
+function candidateMentionsOtherIssuer(selection: CodalReportSelectionDiagnostics | undefined): boolean {
+  return Boolean(
+    selection?.candidates.some((candidate) =>
+      [...candidate.rejectedReasons, ...candidate.warnings].some((message) =>
+        /پرانتز.*(?:دیگر|دیگری)|شرکت\/ناشر دیگری|ناشر دیگری|another issuer|other company/i.test(message)
+      )
+    )
+  );
+}
+
 export function financialReportDiscoverySummary(result: CodalReportDiscoveryResult): string {
   if (result.financialStatementReport) return financialReportSummary(result.financialStatementReport);
+  const financial = result.diagnostics?.financialStatement;
+  const hasResolvedFinancialDiagnostics = Boolean(financial);
+  const resolvedMissingText = candidateMentionsOtherIssuer(financial)
+    ? 'گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد'
+    : financialReportSummary(undefined);
   if (result.status === 'stale-cache' && result.diagnostics?.financialStatement?.selectedConfidence === 'none') {
-    return `بررسی زنده صورت مالی ناموفق بود؛ آخرین نتیجه ذخیره‌شده: ${financialReportSummary(undefined)}`;
+    return `بررسی زنده صورت مالی ناموفق بود؛ آخرین نتیجه ذخیره‌شده: ${resolvedMissingText}`;
   }
+  if (hasResolvedFinancialDiagnostics && financial?.selectedConfidence === 'none') return resolvedMissingText;
   if (result.status === 'not-found') return financialReportSummary(undefined);
   if (result.status === 'stale-cache') return 'نمایش از داده ذخیره‌شده قدیمی';
   return 'به‌دلیل خطای اتصال بررسی نشد';

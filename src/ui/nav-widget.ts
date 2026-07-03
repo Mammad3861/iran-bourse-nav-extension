@@ -775,8 +775,7 @@ function appendManualReviewMarketCandidates(
         setRecord(saved);
         updateResetCodalButton(root, saved);
         updateCompletionWorkflow(root, options, getRecord, setRecord, result, support);
-        button.disabled = true;
-        button.textContent = 'اعمال‌شده';
+        renderMonthlySuggestions(root, result, options, getRecord, setRecord, support);
         setApplyStatus(root, appliedSuggestionMessage('listedPortfolioMarketValue', 'codal-excel-manual-review'));
       } catch (error) {
         setApplyStatus(
@@ -869,6 +868,7 @@ async function persistAppliedRecord(root: HTMLElement, record: ManualOverrideRec
   if (!saved) {
     throw new Error('Saved manual override could not be verified.');
   }
+  applyRecordInputsToForm(root, saved);
   updateResults(root, formatPersianTimestamp(new Date(saved.updatedAt)));
   updateFieldSourceBadges(root, saved);
   return saved;
@@ -907,7 +907,7 @@ function updateCompletionWorkflow(
   if (!container) return;
 
   const record = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, getRecord());
-  const summary = buildNavCompletionSummary(record, latestParseResult);
+  const summary = buildNavCompletionSummary(record, latestParseResult, support);
   container.textContent = '';
 
   const header = document.createElement('div');
@@ -1092,6 +1092,7 @@ function renderMonthlySuggestions(
       setRecord(saved);
       updateResetCodalButton(root, saved);
       updateCompletionWorkflow(root, options, getRecord, setRecord, result, support);
+      renderMonthlySuggestions(root, result, options, getRecord, setRecord, support);
       setApplyStatus(root, 'همه موارد قابل اعتماد با تأیید شما اعمال و ذخیره شد.');
     } catch (error) {
       setApplyStatus(
@@ -1178,8 +1179,7 @@ function renderMonthlySuggestions(
           setRecord(saved);
           updateResetCodalButton(root, saved);
           updateCompletionWorkflow(root, options, getRecord, setRecord, result, support);
-          button.disabled = true;
-          button.textContent = 'اعمال‌شده';
+          renderMonthlySuggestions(root, result, options, getRecord, setRecord, support);
           setApplyStatus(root, appliedSuggestionMessage(target, sourceKind));
         } catch (error) {
           setApplyStatus(
@@ -1485,7 +1485,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
 
   root.querySelector<HTMLButtonElement>('[data-ibnav-smoke-copy]')?.addEventListener('click', async () => {
     const currentRecord = recordFromCurrentInputs(root, options.symbol, options.currentPriceSource, activeRecord);
-    const completion = buildNavCompletionSummary(currentRecord, latestParseResult);
+    const completion = buildNavCompletionSummary(currentRecord, latestParseResult, latestSupport);
     const payload = smokeSummaryText({
       symbol: options.symbol,
       instrumentName: options.instrumentName,
@@ -1585,6 +1585,11 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
         activeRecord = record;
       }, latestParseResult, latestSupport);
+      if (latestParseResult) {
+        renderMonthlySuggestions(root, latestParseResult, options, () => activeRecord, (record) => {
+          activeRecord = record;
+        }, latestSupport);
+      }
       setApplyStatus(root, 'مقادیر پیشنهادی اعمال‌شده پاک شد؛ مقادیر دستی حفظ شد.');
     } catch (error) {
       setApplyStatus(

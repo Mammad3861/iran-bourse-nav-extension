@@ -42,7 +42,7 @@ Use `کپی خلاصه Smoke Test` after Codal checks finish. The copied JSON sh
 - NAV completion status and missing fields
 - live fetch/cache status
 - parser data status: `live`, `stale-cache`, or `unavailable-network-error`
-- candidate availability: `live-candidates`, `stale-candidates`, `unavailable`, or `none-found-live`
+- candidate availability: `live-nav-candidates`, `live-basic-candidates-only`, `no-nav-candidates-live`, `stale-candidates`, or `unavailable-network-error`
 
 For `وصندوق`, TSETMC-provided/applied total shares should appear as `totalSharesSource: "tsetmc-suggestion"` even if older saved metadata used `codal-suggestion` with `TSETMC instrument info`.
 
@@ -50,9 +50,13 @@ When live Codal fetch fails, check these fields carefully:
 
 - `parserDataStatus: "stale-cache"` means live Codal failed but a compact parsed summary from the last successful run is being shown. Candidate counts and extracted candidates are stale and require manual review.
 - `parserDataStatus: "unavailable-network-error"` means live Codal failed and no parsed summary cache was available. Empty candidates in this state mean "not checked", not "none exist".
-- `candidateAvailability: "none-found-live"` should appear only after a live parser run completed and found no candidates.
+- `candidateAvailability: "live-basic-candidates-only"` means only basic suggestions such as total shares were found, not NAV portfolio/equity candidates.
+- `candidateAvailability: "no-nav-candidates-live"` should appear only after a live parser run completed and found no NAV candidates.
+- `candidateAvailability: "unavailable-network-error"` means live Codal failed and no parsed candidate result is available.
 - Use `تلاش دوباره برای دریافت کدال` to retry live Codal. This must not clear manual values or applied suggestions.
 - Use `کپی وضعیت اتصال کدال` for compact connection diagnostics: domain, live fetch status, cache use, attempt count, parser data status, and stale-cache usage.
+- Expanded report/parser diagnostics should wrap or scroll inside the widget; they should not force horizontal scrolling on the host TSETMC page.
+- Resetting applied suggestions should immediately update field values, completion workflow, and candidate-card state without requiring a page reload.
 
 Market-value review counts are split:
 

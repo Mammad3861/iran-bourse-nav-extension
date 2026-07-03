@@ -193,7 +193,55 @@ describe('Codal parsed summary cache', () => {
 
     expect(result.extractedValues).toEqual([]);
     expect(result.diagnostics.parserDataStatus).toBe('unavailable-network-error');
-    expect(result.diagnostics.candidateAvailability).toBe('unavailable');
+    expect(result.diagnostics.candidateAvailability).toBe('unavailable-network-error');
     expect(result.warnings.join(' ')).toContain('خطای اتصال');
+  });
+
+  it('distinguishes NAV candidates from basic total-share-only candidates', () => {
+    const totalSharesOnly = parseResult();
+    totalSharesOnly.extractedValues = [
+      {
+        kind: 'totalSharesSuggestion',
+        label: 'تعداد کل سهام',
+        value: 9_000_000_000,
+        rawText: '9000000000',
+        confidence: 'medium',
+        sourceTableIndex: -1
+      }
+    ];
+    totalSharesOnly.primarySuggestions = [];
+    totalSharesOnly.secondarySuggestions = [];
+    totalSharesOnly.diagnostics.rejectedCandidates = [];
+    totalSharesOnly.diagnostics.sourceStrategy = undefined;
+
+    expect(parseResultFromParsedCache({
+      symbol: 'فولاد',
+      parserStatus: totalSharesOnly.status,
+      marketReviewCandidateCount: 0,
+      marketReviewVisibleCandidateCount: 0,
+      marketReviewHiddenCandidateCount: 0,
+      extractedCandidates: totalSharesOnly.extractedValues,
+      primarySuggestions: [],
+      secondarySuggestions: [],
+      rejectedCandidates: [],
+      userFacingWarnings: [],
+      parsedAt: totalSharesOnly.parsedAt,
+      cachedAt: '2026-07-03T00:00:00.000Z'
+    }).diagnostics.candidateAvailability).toBe('live-basic-candidates-only');
+
+    expect(parseResultFromParsedCache({
+      symbol: 'وصندوق',
+      parserStatus: 'parsed',
+      marketReviewCandidateCount: 0,
+      marketReviewVisibleCandidateCount: 0,
+      marketReviewHiddenCandidateCount: 0,
+      extractedCandidates: parseResult().extractedValues,
+      primarySuggestions: [],
+      secondarySuggestions: [],
+      rejectedCandidates: [],
+      userFacingWarnings: [],
+      parsedAt: totalSharesOnly.parsedAt,
+      cachedAt: '2026-07-03T00:00:00.000Z'
+    }).diagnostics.candidateAvailability).toBe('live-nav-candidates');
   });
 });

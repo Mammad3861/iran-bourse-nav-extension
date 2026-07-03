@@ -343,7 +343,7 @@ describe('smoke summary', () => {
     expect((summary.userFacingWarnings as string[]).join(' ')).toContain('آخرین نتیجه ذخیره‌شده');
   });
 
-  it('marks network failures without parsed cache as unavailable, not none-found-live', () => {
+  it('marks network failures without parsed cache as unavailable, not no-nav-candidates-live', () => {
     const summary = createSmokeSummary({
       symbol: 'وصندوق',
       currentPriceSource: 'unknown',
@@ -369,7 +369,7 @@ describe('smoke summary', () => {
 
     expect(summary).toMatchObject({
       parserDataStatus: 'unavailable-network-error',
-      candidateAvailability: 'unavailable',
+      candidateAvailability: 'unavailable-network-error',
       extractedCandidates: []
     });
     expect((summary.userFacingWarnings as string[]).join(' ')).toContain('کاندیدهای کدال بررسی نشدند');

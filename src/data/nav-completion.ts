@@ -2,6 +2,7 @@ import type { NavInputs } from '../core/nav-calculator';
 import { analyzeNavCompleteness } from '../core/nav-calculator';
 import type { MonthlyActivityParseResult } from './codal-monthly-parser';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from './manual-overrides';
+import type { HoldingSupportClassification } from './symbol-classification';
 
 export type NavCompletionStatus = 'incomplete' | 'calculable-warning' | 'complete-needs-review' | 'complete-reviewed';
 
@@ -128,16 +129,31 @@ function hasSuggestion(result: MonthlyActivityParseResult | undefined, kind: str
   );
 }
 
+function hasFinancialStatementContext(result: MonthlyActivityParseResult | undefined): boolean {
+  return Boolean(
+    result?.diagnostics.tables.some((table) => table.sourceGroup === 'financial' || table.sourceGroup === 'financial-excel') ||
+      result?.diagnostics.reportSelection?.reportKind === 'financial-statement' ||
+      result?.warnings.some((warning) => warning.includes('صورت مالی'))
+  );
+}
+
 function guidanceForField(
   field: keyof NavInputs,
   value: number | undefined,
   source: ManualValueSourceMetadata | undefined,
-  result: MonthlyActivityParseResult | undefined
+  result: MonthlyActivityParseResult | undefined,
+  support: HoldingSupportClassification | undefined
 ): string {
   if (field === 'equity') {
     if (value !== undefined) return 'حقوق صاحبان سهام وارد شده است؛ دوره، واحد و منبع را با گزارش رسمی تطبیق دهید.';
     if (hasSuggestion(result, 'equitySuggestion')) {
       return 'پیشنهاد از صورت مالی موجود است؛ قبل از اعمال، دوره و واحد را بررسی کنید.';
+    }
+    if (hasFinancialStatementContext(result) && support?.status === 'likely-holding') {
+      return 'صورت مالی موجود است، اما ردیف جمع حقوق صاحبان سهام با اطمینان کافی استخراج نشد؛ مقدار را دستی وارد کنید.';
+    }
+    if (support && support.status !== 'likely-holding') {
+      return 'پیشنهاد قابل اتکا برای حقوق صاحبان سهام پیدا نشد؛ در صورت نیاز مقدار را دستی وارد کنید.';
     }
     return 'صورت مالی معتبر برای استخراج حقوق صاحبان سهام پیدا نشد؛ مقدار را دستی وارد کنید.';
   }
@@ -182,7 +198,8 @@ function guidanceForField(
 
 export function buildNavCompletionSummary(
   record: ManualOverrideRecord,
-  result?: MonthlyActivityParseResult
+  result?: MonthlyActivityParseResult,
+  support?: HoldingSupportClassification
 ): NavCompletionSummary {
   const inputs = record.inputs;
   const completeness = analyzeNavCompleteness(inputs);
@@ -203,7 +220,7 @@ export function buildNavCompletionSummary(
       needsReview: fieldNeedsReview(source, value),
       canConfirmReview: appliedSuggestionSource(source) && value !== undefined && source?.reviewedByUser !== true,
       canConfirmZero: field === 'unlistedPortfolioSurplus' && value === undefined,
-      guidance: guidanceForField(field, value, source, result)
+      guidance: guidanceForField(field, value, source, result, support)
     };
   });
 

@@ -8,7 +8,12 @@ import type {
 import { manualReviewMarketValueSummary } from './market-value-review';
 
 export type ParserDataStatus = 'live' | 'stale-cache' | 'unavailable-network-error';
-export type CandidateAvailability = 'live-candidates' | 'stale-candidates' | 'unavailable' | 'none-found-live';
+export type CandidateAvailability =
+  | 'live-nav-candidates'
+  | 'live-basic-candidates-only'
+  | 'no-nav-candidates-live'
+  | 'stale-candidates'
+  | 'unavailable-network-error';
 
 export interface ParsedCodalCacheRecord {
   symbol: string;
@@ -93,14 +98,29 @@ function candidateAvailabilityFor(
   parserDataStatus: ParserDataStatus
 ): CandidateAvailability {
   const review = manualReviewMarketValueSummary(result);
-  const hasCandidates =
-    result.extractedValues.length > 0 ||
-    result.primarySuggestions.length > 0 ||
-    result.secondarySuggestions.length > 0 ||
-    review.totalCandidates > 0;
-  if (parserDataStatus === 'unavailable-network-error') return 'unavailable';
-  if (parserDataStatus === 'stale-cache') return hasCandidates ? 'stale-candidates' : 'unavailable';
-  return hasCandidates ? 'live-candidates' : 'none-found-live';
+  const allKinds = [
+    ...result.extractedValues.map((value) => value.kind),
+    ...result.primarySuggestions.map((value) => value.kind),
+    ...result.secondarySuggestions.map((value) => value.kind)
+  ];
+  const hasNavCandidates =
+    review.totalCandidates > 0 ||
+    allKinds.some((kind) =>
+      [
+        'equitySuggestion',
+        'listedPortfolioCostValue',
+        'listedPortfolioMarketValue',
+        'unlistedPortfolioCostValue',
+        'unlistedPortfolioEstimatedValue',
+        'unlistedPortfolioSurplusSuggestion'
+      ].includes(kind)
+    );
+  const hasBasicCandidates = allKinds.some((kind) => kind === 'totalSharesSuggestion');
+  if (parserDataStatus === 'unavailable-network-error') return 'unavailable-network-error';
+  if (parserDataStatus === 'stale-cache') return hasNavCandidates || hasBasicCandidates ? 'stale-candidates' : 'unavailable-network-error';
+  if (hasNavCandidates) return 'live-nav-candidates';
+  if (hasBasicCandidates) return 'live-basic-candidates-only';
+  return 'no-nav-candidates-live';
 }
 
 export function markParseResultStale(result: MonthlyActivityParseResult, cachedAt?: string): MonthlyActivityParseResult {
@@ -159,7 +179,7 @@ export function createUnavailableNetworkParseResult(input: {
       parserStatus: 'empty',
       parserDataStatus: 'unavailable-network-error',
       staleParsedCacheUsed: false,
-      candidateAvailability: 'unavailable',
+      candidateAvailability: 'unavailable-network-error',
       parserWarnings: [warning],
       extractedCandidates: [],
       rejectedCandidates: [],
@@ -293,7 +313,7 @@ export function candidateAvailabilityForSmoke(input: {
 }): CandidateAvailability | undefined {
   const status = parserDataStatusFor(input);
   if (!status) return undefined;
-  if (!input.parseResult) return status === 'unavailable-network-error' ? 'unavailable' : undefined;
+  if (!input.parseResult) return status === 'unavailable-network-error' ? 'unavailable-network-error' : undefined;
   return input.parseResult.diagnostics.candidateAvailability ?? candidateAvailabilityFor(input.parseResult, status);
 }
 

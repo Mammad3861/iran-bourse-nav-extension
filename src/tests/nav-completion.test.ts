@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { MonthlyActivityParseResult } from '../data/codal-monthly-parser';
 import type { ManualOverrideRecord } from '../data/manual-overrides';
 import { buildNavCompletionSummary } from '../data/nav-completion';
 import { confirmZeroField, markSuggestionFieldReviewed, resetCodalSuggestionFields } from '../data/suggestion-application';
@@ -10,6 +11,28 @@ function record(overrides: Partial<ManualOverrideRecord> = {}): ManualOverrideRe
     currentPriceSource: 'manual',
     updatedAt: '2026-07-02T00:00:00.000Z',
     fieldSources: {},
+    ...overrides
+  };
+}
+
+function parseResult(overrides: Partial<MonthlyActivityParseResult> = {}): MonthlyActivityParseResult {
+  return {
+    status: 'parsed',
+    tableCandidates: [],
+    extractedValues: [],
+    primarySuggestions: [],
+    secondarySuggestions: [],
+    tablePreviews: [],
+    diagnostics: {
+      detectedTableCount: 1,
+      parserStatus: 'parsed',
+      parserWarnings: [],
+      extractedCandidates: [],
+      rejectedCandidates: [],
+      tables: []
+    },
+    warnings: [],
+    parsedAt: '2026-07-02T00:00:00.000Z',
     ...overrides
   };
 }
@@ -314,5 +337,72 @@ describe('NAV completion workflow model', () => {
     expect(reset.inputs.listedPortfolioCostValue).toBeUndefined();
     expect(reset.inputs.unlistedPortfolioSurplus).toBe(0);
     expect(reset.fieldSources?.unlistedPortfolioSurplus?.source).toBe('user-confirmed-zero');
+  });
+
+  it('does not claim an equity suggestion exists when no equity candidate was extracted', () => {
+    const summary = buildNavCompletionSummary(
+      record(),
+      parseResult({
+        diagnostics: {
+          detectedTableCount: 1,
+          parserStatus: 'parsed',
+          parserWarnings: [],
+          extractedCandidates: [],
+          rejectedCandidates: [],
+          tables: [
+            {
+              tableIndex: 0,
+              sourceGroup: 'financial',
+              rawHeaders: ['شرح', 'مبلغ'],
+              normalizedHeaders: ['شرح', 'مبلغ'],
+              firstRawRows: [['سود انباشته', '100']],
+              firstNormalizedRows: [['سود انباشته', '100']],
+              firstRows: [['سود انباشته', '100']],
+              detectedLabels: ['سود انباشته'],
+              totalRowCandidates: [],
+              costColumnCandidates: [],
+              marketValueColumnCandidates: [],
+              failureReasons: ['ردیف جمع حقوق صاحبان سهام پیدا نشد'],
+              textPreview: ''
+            }
+          ]
+        }
+      }),
+      {
+        status: 'unknown',
+        message: 'manual only',
+        reasons: []
+      }
+    );
+
+    const equity = summary.fields.find((field) => field.field === 'equity');
+    expect(equity?.guidance).not.toContain('پیشنهاد از صورت مالی موجود است');
+    expect(equity?.guidance).toContain('پیشنهاد قابل اتکا');
+  });
+
+  it('shows equity suggestion copy only when a real equitySuggestion exists', () => {
+    const summary = buildNavCompletionSummary(
+      record(),
+      parseResult({
+        extractedValues: [
+          {
+            kind: 'equitySuggestion',
+            label: 'جمع حقوق صاحبان سهام',
+            value: 100,
+            rawText: '100',
+            confidence: 'medium',
+            sourceTableIndex: 0
+          }
+        ]
+      }),
+      {
+        status: 'likely-holding',
+        reasons: []
+      }
+    );
+
+    expect(summary.fields.find((field) => field.field === 'equity')?.guidance).toContain(
+      'پیشنهاد از صورت مالی موجود است'
+    );
   });
 });
