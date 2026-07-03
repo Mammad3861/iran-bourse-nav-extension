@@ -37,6 +37,8 @@ This extension is an internal alpha testing tool. It provides a local estimate, 
 - Generic clarification letters may appear in search results; they are downgraded and should not be treated as audited financial statements without manual review.
 - Equity suggestions require a valid issuer-level financial statement. If no such report is selected, the UI should show `حقوق صاحبان سهام از کدال قابل استخراج نبود؛ صورت مالی معتبر برای ناشر پیدا نشد.` instead of using a suspicious or subsidiary report.
 - Consolidated financial statements can differ from standalone issuer-level values; any consolidated equity suggestion is shown with a manual-review warning.
+- Equity extraction is limited to balance-sheet/financial-position tables and true total-equity rows. Totals that combine liabilities and equity, plus component rows such as capital, retained earnings, reserves, treasury share premium/discount, or revaluation surplus, are rejected.
+- Equity suggestions with unknown units or ambiguous current/prior-period columns are low confidence and require manual verification before applying.
 - Total-share suggestions are only safe when a source explicitly labels total shares. The extension does not infer share count from capital, trade volume, trade count, free float, base volume, or market activity fields.
 - Codal report detail fetching may cache raw HTML or JSON locally in `chrome.storage.local`; this content is not sent to any external server by the extension.
 - Detected Codal tables may come from HTML, JSON, script-embedded data, or Codal cell-model arrays. Row and column counts or header previews do not imply the report format is fully supported for value extraction.

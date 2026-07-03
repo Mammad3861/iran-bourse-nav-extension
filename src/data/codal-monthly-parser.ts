@@ -224,6 +224,17 @@ const invalidFinancialStatementSignals = [
   /افشای\s*اطلاعات/
 ];
 
+const financialPositionTableSignals = [
+  /صورت\s*وضعیت\s*مالی/,
+  /ترازنامه/,
+  /statement\s*of\s*financial\s*position/i,
+  /balance\s*sheet/i
+];
+
+const financialPositionAssetSignals = [/دارایی\s*ها/, /دارایی‌ها/];
+const financialPositionLiabilitySignals = [/بدهی\s*ها/, /بدهی‌ها/];
+const financialPositionEquitySignals = [/حقوق\s*صاحبان\s*سهام/, /حقوق\s*مالکانه/];
+
 const totalSharesRejectSignals = [
   /حجم\s*معاملات/,
   /تعداد\s*معاملات/,
@@ -270,7 +281,7 @@ const totalRowPatterns = [
 ];
 
 interface UnitInfo {
-  unit: 'ریال' | 'هزار ریال' | 'میلیون ریال' | 'میلیون تومان' | 'نامشخص';
+  unit: 'ریال' | 'هزار ریال' | 'میلیون ریال' | 'میلیارد ریال' | 'میلیون تومان' | 'نامشخص';
   multiplier: number;
   clear: boolean;
   warning?: string;
@@ -544,6 +555,9 @@ function unitInfoForText(text: string): UnitInfo {
   if (/میلیون\s*تومان/.test(text)) {
     return { unit: 'میلیون تومان', multiplier: 10_000_000, clear: true };
   }
+  if (/میلیارد\s*ریال|میلیارد\s*ریالی/.test(text)) {
+    return { unit: 'میلیارد ریال', multiplier: 1_000_000_000, clear: true };
+  }
   if (/میلیون\s*ریال|میلیون\s*ریالی/.test(text)) {
     return { unit: 'میلیون ریال', multiplier: 1_000_000, clear: true };
   }
@@ -680,6 +694,8 @@ function dateFromText(value: string): string | undefined {
 function columnContextFor(rows: string[][], columnIndex: number, reportPeriod?: string): ColumnContext {
   const headerCells = rows.slice(0, 6).map((row) => normalizeText(row[columnIndex] ?? '')).filter(Boolean);
   const periodLabel = headerCells.find((cell) => dateFromText(cell));
+  const currentPeriodLabel = headerCells.find((cell) => /دوره\s*جاری|پایان\s*دوره|سال\s*مالی\s*منتهی/.test(cell));
+  const priorPeriodLabel = headerCells.find((cell) => /دوره\s*قبل|سال\s*قبل|سال\s*مالی\s*قبل|پایان\s*سال\s*مالی\s*قبل/.test(cell));
   const measureLabel = headerCells.find((cell) =>
     hasAny(cell, [...labelPatterns.listedPortfolioCostValue, ...labelPatterns.listedPortfolioMarketValue])
   );
@@ -687,10 +703,10 @@ function columnContextFor(rows: string[][], columnIndex: number, reportPeriod?: 
 
   return {
     index: columnIndex,
-    periodLabel,
+    periodLabel: periodLabel ?? currentPeriodLabel ?? priorPeriodLabel,
     measureLabel,
-    isCurrentPeriod: Boolean(reportPeriod && periodDate === reportPeriod),
-    isPriorPeriod: Boolean(reportPeriod && periodDate && periodDate !== reportPeriod)
+    isCurrentPeriod: Boolean((reportPeriod && periodDate === reportPeriod) || (!periodDate && currentPeriodLabel)),
+    isPriorPeriod: Boolean(priorPeriodLabel || (reportPeriod && periodDate && periodDate !== reportPeriod))
   };
 }
 
@@ -737,6 +753,8 @@ function extractionReason(options: {
   const unit =
     options.unitMultiplier === 10_000_000
       ? '؛ واحد جدول میلیون تومان تشخیص داده شد'
+      : options.unitMultiplier === 1_000_000_000
+        ? '؛ واحد جدول میلیارد ریال تشخیص داده شد'
       : options.unitMultiplier === 1_000_000
         ? '؛ واحد جدول میلیون ریال تشخیص داده شد'
         : options.unitMultiplier === 1_000
@@ -951,6 +969,7 @@ function scoreExtractedValue(value: ExtractedPortfolioValue, tables: ParsedTable
   if (value.kind === 'listedPortfolioMarketValue' && table?.source === 'codal-excel') score += 10;
   if (value.kind.startsWith('unlistedPortfolio')) score += 20;
   if (value.kind === 'equitySuggestion') score += hasAny(text, labelPatterns.equitySuggestion) ? 35 : 0;
+  if (value.kind === 'equitySuggestion' && table && isFinancialPositionTable(table)) score += 25;
   if (value.kind === 'totalSharesSuggestion') score += hasAny(text, labelPatterns.totalSharesSuggestion) ? 30 : 0;
   if (table?.reconstruction) score += 20;
   if (hasAny(text, listedSignals)) score += 20;
@@ -1280,29 +1299,72 @@ function normalizeEquityLabel(value: string | undefined): string {
     .trim();
 }
 
-function isStrongEquityTotalRow(row: string[]): boolean {
+type EquityRowMatch = 'exact-total' | 'parent-attributable' | 'generic-total' | undefined;
+
+function equityRowMatch(row: string[]): EquityRowMatch {
   const label = normalizeEquityLabel(rowLabel(row));
   const compact = label.replace(/\s+/g, '');
-  const strong =
-    compact === 'جمعحقوقمالکانه' ||
-    compact === 'جمعحقوقصاحبانسهام' ||
-    compact === 'جمعحقوقصاحبانسهامشرکتاصلی' ||
-    compact === 'جمعحقوقصاحبانسهاماصلی' ||
-    compact === 'حقوقمالکانه' ||
-    compact === 'حقوقصاحبانسهام';
-  if (!strong) {
-    return false;
-  }
 
-  const componentSignals = [
+  const rejectSignals = [
+    /حقوق\s*صاحبان\s*سهام\s*و\s*بدهی\s*ها/,
+    /حقوق\s*صاحبان\s*سهام\s*و\s*بدهی‌ها/,
+    /بدهی\s*ها\s*و\s*حقوق\s*صاحبان\s*سهام/,
+    /بدهی‌ها\s*و\s*حقوق\s*صاحبان\s*سهام/,
+    /حقوق\s*مالکانه\s*و\s*بدهی\s*ها/,
+    /حقوق\s*مالکانه\s*و\s*بدهی‌ها/,
+    /جمع\s*دارایی\s*ها/,
+    /جمع\s*دارایی‌ها/,
+    /جمع\s*بدهی\s*ها/,
+    /جمع\s*بدهی‌ها/,
+    /^بدهی\s*ها$/,
+    /^بدهی‌ها$/,
+    /افزایش\s*سرمایه/,
     /انتقال\s*از\s*سایر\s*اقلام/,
     /سود\s*\(?زیان\)?\s*انباشته/,
+    /سود\s*انباشته/,
+    /زیان\s*انباشته/,
     /صرف\s*\(?کسر\)?\s*سهام/,
     /کسر\s*سهام\s*خزانه/,
     /اندوخته/,
+    /مازاد\s*تجدید\s*ارزیابی/,
     /^سرمایه$/
   ];
-  return !componentSignals.some((pattern) => pattern.test(label));
+  if (rejectSignals.some((pattern) => pattern.test(label))) return undefined;
+
+  if (
+    compact === 'جمعحقوقمالکانه' ||
+    compact === 'جمعحقوقمالکانهشرکت' ||
+    compact === 'جمعحقوقصاحبانسهام' ||
+    compact === 'جمعحقوقصاحبانسهامشرکت' ||
+    compact === 'جمعحقوقصاحبانسهامشرکتاصلی' ||
+    compact === 'جمعحقوقصاحبانسهاماصلی'
+  ) {
+    return 'exact-total';
+  }
+
+  if (
+    compact === 'حقوقمالکانهقابلانتساببهمالکانشرکتاصلی' ||
+    compact === 'جمعحقوققابلانتساببهمالکانشرکتاصلی' ||
+    compact === 'جمعحقوقمالکانهقابلانتساببهمالکانشرکتاصلی'
+  ) {
+    return 'parent-attributable';
+  }
+
+  if (compact === 'حقوقمالکانه' || compact === 'حقوقصاحبانسهام') {
+    return 'generic-total';
+  }
+
+  return undefined;
+}
+
+function isFinancialPositionTable(table: ParsedTable): boolean {
+  const text = tableText(table);
+  if (hasAny(text, financialPositionTableSignals)) return true;
+  return (
+    hasAny(text, financialPositionAssetSignals) &&
+    hasAny(text, financialPositionLiabilitySignals) &&
+    hasAny(text, financialPositionEquitySignals)
+  );
 }
 
 function bestNumericCellInRow(
@@ -1337,6 +1399,7 @@ function extractStandaloneFinancialValue(options: {
 }): ExtractedPortfolioValue[] {
   const extracted: ExtractedPortfolioValue[] = [];
   const consolidated = isConsolidatedFinancialStatement(options.detail);
+  const financialPositionTable = isFinancialPositionTable(options.table);
   const rows = options.table.rows
     .map((row, rowIndex) => ({ row, rowIndex }))
     .filter(({ row }) => rowMatchesAny(row, options.rowPatterns));
@@ -1345,8 +1408,11 @@ function extractStandaloneFinancialValue(options: {
     if (options.kind === 'totalSharesSuggestion' && rowMatchesAny(row, totalSharesRejectSignals)) {
       continue;
     }
-    if (options.kind === 'equitySuggestion' && !isStrongEquityTotalRow(row)) {
-      continue;
+    const equityMatch = options.kind === 'equitySuggestion' ? equityRowMatch(row) : undefined;
+    if (options.kind === 'equitySuggestion') {
+      if (!equityMatch || !financialPositionTable) {
+        continue;
+      }
     }
 
     const numeric = bestNumericCellInRow(options.table, row, options.reportPeriod);
@@ -1355,16 +1421,28 @@ function extractStandaloneFinancialValue(options: {
     const multiplier = options.kind === 'totalSharesSuggestion' ? 1 : options.unitInfo.multiplier;
     const confidence: ParseConfidence =
       options.kind === 'equitySuggestion'
-        ? consolidated
+        ? !options.unitInfo.clear
           ? 'low'
-          : !options.unitInfo.clear
-          ? 'medium'
-          : 'high'
+          : consolidated || equityMatch === 'parent-attributable' || equityMatch === 'generic-total'
+            ? 'medium'
+            : !numeric.context.isCurrentPeriod && Boolean(options.reportPeriod)
+              ? 'low'
+              : 'high'
         : 'medium';
     const consolidatedWarning =
       options.kind === 'equitySuggestion' && consolidated
         ? 'این مقدار از صورت مالی تلفیقی استخراج شده و نیازمند بررسی دستی است.'
         : undefined;
+    const parentWarning =
+      options.kind === 'equitySuggestion' && equityMatch === 'parent-attributable'
+        ? 'این مقدار مربوط به حقوق مالکانه قابل انتساب به مالکان شرکت اصلی است و باید با مبنای NAV تطبیق داده شود.'
+        : undefined;
+    const periodWarning =
+      options.kind === 'equitySuggestion' && !numeric.context.isCurrentPeriod && Boolean(options.reportPeriod)
+        ? 'ستون دوره جاری با اطمینان تشخیص داده نشد؛ مقدار نیازمند بررسی دستی است.'
+        : undefined;
+    const unitWarning = options.kind === 'equitySuggestion' && !options.unitInfo.clear ? options.unitInfo.warning : undefined;
+    const warning = [consolidatedWarning, parentWarning, periodWarning, options.warning, unitWarning].filter(Boolean).join(' ') || undefined;
     extracted.push({
       kind: options.kind,
       label: valueLabel(options.kind),
@@ -1390,7 +1468,7 @@ function extractStandaloneFinancialValue(options: {
           .filter(Boolean)
           .join(' / '),
       reason: `جدول ${options.table.index}، ردیف ${rowIndex + 1}، ستون ${numeric.columnIndex + 1} (${confidence})`,
-      warning: consolidatedWarning ?? options.warning ?? (!options.unitInfo.clear && options.kind === 'equitySuggestion' ? options.unitInfo.warning : undefined)
+      warning
     });
   }
 

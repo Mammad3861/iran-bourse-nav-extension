@@ -1037,7 +1037,7 @@ describe('parseMonthlyActivityReport', () => {
     );
   });
 
-  it('downgrades consolidated equity suggestions to low confidence', () => {
+  it('downgrades consolidated equity suggestions to medium confidence', () => {
     const result = parseFinancialStatementReport(
       detail({
         title: 'اطلاعات و صورت‌های مالی تلفیقی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹',
@@ -1080,8 +1080,208 @@ describe('parseMonthlyActivityReport', () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: 'equitySuggestion',
+            confidence: 'medium',
+            warning: expect.stringContaining('تلفیقی')
+          })
+      ])
+    );
+  });
+
+  it('extracts owner-equity total rows with clear units as high-confidence equity suggestions', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['دارایی‌ها', '۵۰۰۰'],
+              ['بدهی‌ها', '۲۰۰۰'],
+              ['جمع حقوق مالکانه', '۳۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          value: 3000,
+          confidence: 'high',
+          unit: 'ریال',
+          rowLabel: 'جمع حقوق مالکانه'
+        })
+      ])
+    );
+  });
+
+  it('rejects liabilities plus equity totals and component rows as equity suggestions', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['دارایی‌ها', '۹۰۰۰'],
+              ['بدهی‌ها', '۴۰۰۰'],
+              ['سرمایه', '۱۰۰۰'],
+              ['سود انباشته', '۲۰۰۰'],
+              ['جمع حقوق صاحبان سهام و بدهی‌ها', '۹۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
+    );
+  });
+
+  it('prefers the current-period equity column over prior-period values', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', '۱۴۰۴/۱۲/۲۹', '۱۴۰۳/۱۲/۳۰'],
+            rows: [
+              ['شرح', '۱۴۰۴/۱۲/۲۹', '۱۴۰۳/۱۲/۳۰'],
+              ['دارایی‌ها', '۵۰۰۰', '۴۰۰۰'],
+              ['بدهی‌ها', '۲۰۰۰', '۱۰۰۰'],
+              ['جمع حقوق صاحبان سهام', '۳۰۰۰', '۹۹۹۹']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          rawValue: 3000,
+          value: 3_000_000_000,
+          period: '1404/12/29',
+          confidence: 'high'
+        })
+      ])
+    );
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion', rawValue: 9999 })])
+    );
+  });
+
+  it('keeps equity suggestions with unknown unit low confidence and unscaled', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [
+              ['شرح', 'دوره جاری'],
+              ['دارایی‌ها', '۵۰۰۰'],
+              ['بدهی‌ها', '۲۰۰۰'],
+              ['جمع حقوق صاحبان سهام', '۳۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          value: 3000,
           confidence: 'low',
-          warning: expect.stringContaining('تلفیقی')
+          unit: 'نامشخص',
+          warning: expect.stringContaining('واحد')
         })
       ])
     );

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-alpha.3
+
+### Added
+
+- Safer equity extraction from valid issuer-level Codal financial statements.
+- Conservative `equitySuggestion` candidates from true total-equity rows only.
+- Smoke Summary `equitySource` when an equity suggestion is applied.
+
+### Changed
+
+- Rejects component equity rows and liabilities-plus-equity totals as equity suggestions.
+- Downgrades consolidated, unknown-unit, or period-ambiguous equity candidates for manual review.
+
 ## 0.1.0-alpha.1
 
 Internal alpha release for manual testing. This is not a public or Chrome Web Store release.

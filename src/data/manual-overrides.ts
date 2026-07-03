@@ -4,6 +4,7 @@ import type { ParseConfidence } from './codal-monthly-parser';
 export type ManualValueSourceKind =
   | 'manual'
   | 'codal-suggestion'
+  | 'codal-financial-suggestion'
   | 'codal-excel-manual-review'
   | 'tsetmc-suggestion'
   | 'financial-statement-suggestion'

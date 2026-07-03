@@ -51,6 +51,7 @@ function appliedSuggestionSource(source: ManualValueSourceMetadata | undefined):
   return Boolean(
     source &&
       (source.source === 'codal-suggestion' ||
+        source.source === 'codal-financial-suggestion' ||
         source.source === 'codal-excel-manual-review' ||
         source.source === 'tsetmc-suggestion' ||
         source.source === 'financial-statement-suggestion')
@@ -95,6 +96,7 @@ function statusLabelForSource(
   if (source.stale) return 'مقدار ذخیره‌شده قدیمی / stale';
   if (effectiveSource === 'tsetmc-suggestion') return 'اعمال‌شده از پیشنهاد TSETMC';
   if (effectiveSource === 'codal-excel-manual-review') return 'اعمال‌شده از بررسی دستی Excel کدال';
+  if (effectiveSource === 'codal-financial-suggestion') return 'اعمال‌شده از صورت مالی کدال';
   if (effectiveSource === 'financial-statement-suggestion') return 'اعمال‌شده از صورت مالی کدال';
   if (effectiveSource === 'codal-suggestion') return 'اعمال‌شده از پیشنهاد کدال';
   return 'نیازمند بررسی دستی';

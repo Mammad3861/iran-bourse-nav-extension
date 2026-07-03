@@ -82,7 +82,9 @@ The compact summary should not include raw Codal tables, full table previews, or
 - Unsupported/non-holding symbols keep the calculator usable and show a clear limitation message.
 - Non-holding symbols are supported as basic-info/manual-calculator targets only unless portfolio/NAV-specific data is found.
 - Subsidiary or other-company financial reports must stay out of the issuer-level financial report slot and should appear only in diagnostics/smoke-summary rejection fields.
-- Equity suggestions require a strict aggregate row such as `جمع حقوق صاحبان سهام`, `جمع حقوق مالکانه`, or `حقوق صاحبان سهام`. Component rows such as retained earnings, treasury share premium/discount, reserves, capital, or transfer rows must not become equity suggestions.
+- Equity suggestions require a valid issuer-level financial statement, a balance-sheet/financial-position table, and a strict aggregate row such as `جمع حقوق صاحبان سهام`, `جمع حقوق مالکانه`, or an attributable-to-parent equity total. Component rows such as retained earnings, treasury share premium/discount, reserves, capital, or transfer rows must not become equity suggestions.
+- Rows that combine equity with liabilities, such as `جمع حقوق صاحبان سهام و بدهی‌ها`, are not equity and must stay out of apply-ready suggestions.
+- Equity suggestion units and periods must be manually verified. Unknown units or ambiguous current/prior-period columns should stay low confidence.
 - Codal and Excel network requests stay in the MV3 background/service worker.
 - Content scripts must not directly fetch `codal.ir`, `search.codal.ir`, or `excel.codal.ir`.
 - Failed live Codal fetches must not clear the last successful cached discovery or make a connection failure look like a true no-report result.

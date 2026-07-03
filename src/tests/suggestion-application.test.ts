@@ -272,16 +272,31 @@ describe('suggestion application', () => {
     const applied = applySuggestionToRecord(undefined, suggestion('equitySuggestion', 1_200_000), {
       symbol: 'وصندوق',
       currentPriceSource: 'manual',
+      sourceKind: 'codal-financial-suggestion',
       appliedAt: '2026-06-28T10:00:00.000Z'
     });
     const analysis = analyzeNavCompleteness(applied.inputs);
 
     expect(applied.inputs.equity).toBe(1_200_000);
-    expect(applied.fieldSources?.equity?.source).toBe('codal-suggestion');
+    expect(applied.fieldSources?.equity?.source).toBe('codal-financial-suggestion');
     expect(analysis.navTotalAvailable).toBe(false);
     expect(analysis.missingFields).toEqual(
       expect.arrayContaining(['listedPortfolioMarketValue', 'listedPortfolioCostValue', 'unlistedPortfolioSurplus'])
     );
+  });
+
+  it('reset applied suggestions clears Codal financial equity suggestions', () => {
+    const applied = applySuggestionToRecord(undefined, suggestion('equitySuggestion', 1_200_000), {
+      symbol: 'وصندوق',
+      currentPriceSource: 'manual',
+      sourceKind: 'codal-financial-suggestion',
+      appliedAt: '2026-06-28T10:00:00.000Z'
+    });
+
+    const reset = resetCodalSuggestionFields(applied, '2026-06-28T11:00:00.000Z');
+
+    expect(reset.inputs.equity).toBeUndefined();
+    expect(reset.fieldSources?.equity).toBeUndefined();
   });
 
   it('applies total share suggestions without completing NAV by itself', () => {

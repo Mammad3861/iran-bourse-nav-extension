@@ -6,6 +6,7 @@ import { manualFieldMetadata, normalizeManualOverrideRecord, userConfirmedZeroMe
 
 export const appliedSuggestionSourceKinds: ReadonlySet<ManualValueSourceMetadata['source']> = new Set([
   'codal-suggestion',
+  'codal-financial-suggestion',
   'codal-excel-manual-review',
   'tsetmc-suggestion',
   'financial-statement-suggestion'
@@ -44,6 +45,14 @@ export function sourceMetadataForSuggestion(
     unit: suggestion.unit
   };
   if (context.sourceKind === 'codal-excel-manual-review') {
+    metadata.tableIndex = suggestion.sourceTableIndex;
+    metadata.rowLabel = suggestion.rowLabel;
+    metadata.columnLabel = suggestion.columnLabel;
+    metadata.rawText = suggestion.rawText;
+    metadata.rawValue = suggestion.rawValue;
+    metadata.scaledValue = suggestion.scaledValue ?? suggestion.value;
+    metadata.stale = context.stale;
+  } else if (context.sourceKind === 'codal-financial-suggestion' || context.sourceKind === 'financial-statement-suggestion') {
     metadata.tableIndex = suggestion.sourceTableIndex;
     metadata.rowLabel = suggestion.rowLabel;
     metadata.columnLabel = suggestion.columnLabel;

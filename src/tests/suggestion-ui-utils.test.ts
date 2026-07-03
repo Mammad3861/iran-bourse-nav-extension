@@ -70,6 +70,22 @@ describe('suggestion UI utilities', () => {
     );
   });
 
+  it('uses Codal financial source metadata for equity suggestions', () => {
+    const sourceKind = suggestionSourceKindFor({
+      kind: 'equitySuggestion',
+      label: 'حقوق صاحبان سهام',
+      value: 1_200_000,
+      rawText: '1200000',
+      confidence: 'high',
+      sourceTableIndex: 0
+    }, 'صورت مالی');
+
+    expect(sourceKind).toBe('codal-financial-suggestion');
+    expect(appliedSuggestionMessage('equity', sourceKind)).toBe(
+      'حقوق صاحبان سهام از پیشنهاد صورت مالی کدال اعمال و ذخیره شد.'
+    );
+  });
+
   it('detects matching already-applied suggestions', () => {
     const suggestion = totalSharesSuggestion();
     const record: ManualOverrideRecord = {

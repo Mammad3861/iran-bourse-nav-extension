@@ -152,6 +152,8 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     holdingSupport: input.support,
     currentPrice: input.currentPrice ?? input.record?.inputs.currentPrice,
     currentPriceSource: input.currentPriceSource,
+    equity: input.record?.inputs.equity,
+    equitySource: normalizedSourceFor(input.record, 'equity'),
     totalShares: input.record?.inputs.totalShares,
     totalSharesSource: normalizedSourceFor(input.record, 'totalShares'),
     codalDiscoveryStatus: input.discovery?.status,

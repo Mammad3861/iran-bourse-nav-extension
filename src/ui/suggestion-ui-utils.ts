@@ -40,6 +40,7 @@ function effectiveSourceForField(
 
 export function suggestionSourceLabel(source: ManualValueSourceMetadata['source']): string {
   if (source === 'tsetmc-suggestion') return 'پیشنهاد TSETMC';
+  if (source === 'codal-financial-suggestion') return 'پیشنهاد صورت مالی کدال';
   if (source === 'financial-statement-suggestion') return 'پیشنهاد صورت مالی';
   if (source === 'codal-excel-manual-review') return 'بررسی دستی Excel کدال';
   if (source === 'codal-suggestion') return 'پیشنهاد کدال';
@@ -69,7 +70,7 @@ export function suggestionSourceKindFor(
     return 'tsetmc-suggestion';
   }
   if (value.kind === 'equitySuggestion') {
-    return 'financial-statement-suggestion';
+    return 'codal-financial-suggestion';
   }
   return 'codal-suggestion';
 }
