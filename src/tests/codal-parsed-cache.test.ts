@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CodalReportDiscoveryResult } from '../data/codal-client';
 import type { MonthlyActivityParseResult } from '../data/codal-monthly-parser';
 import {
+  candidateAvailabilityForSmoke,
   createUnavailableNetworkParseResult,
   getParsedCodalSummary,
   markParseResultStale,
@@ -243,5 +244,37 @@ describe('Codal parsed summary cache', () => {
       parsedAt: totalSharesOnly.parsedAt,
       cachedAt: '2026-07-03T00:00:00.000Z'
     }).diagnostics.candidateAvailability).toBe('live-nav-candidates');
+  });
+
+  it('recomputes smoke candidate availability when live diagnostics carry an outdated value', () => {
+    const totalSharesOnly = parseResult();
+    totalSharesOnly.extractedValues = [
+      {
+        kind: 'totalSharesSuggestion',
+        label: 'تعداد کل سهام',
+        value: 9_000_000_000,
+        rawText: '9000000000',
+        confidence: 'medium',
+        sourceTableIndex: -1
+      }
+    ];
+    totalSharesOnly.primarySuggestions = [];
+    totalSharesOnly.secondarySuggestions = [];
+    totalSharesOnly.diagnostics.rejectedCandidates = [];
+    totalSharesOnly.diagnostics.sourceStrategy = undefined;
+    totalSharesOnly.diagnostics.candidateAvailability = 'live-nav-candidates';
+
+    expect(candidateAvailabilityForSmoke({ parseResult: totalSharesOnly })).toBe('live-basic-candidates-only');
+  });
+
+  it('marks a live parse with no NAV or basic candidates as no-nav-candidates-live', () => {
+    const emptyLive = parseResult();
+    emptyLive.extractedValues = [];
+    emptyLive.primarySuggestions = [];
+    emptyLive.secondarySuggestions = [];
+    emptyLive.diagnostics.rejectedCandidates = [];
+    emptyLive.diagnostics.sourceStrategy = undefined;
+
+    expect(candidateAvailabilityForSmoke({ parseResult: emptyLive })).toBe('no-nav-candidates-live');
   });
 });

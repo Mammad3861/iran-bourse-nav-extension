@@ -1,5 +1,6 @@
 .ibnav-root {
   direction: rtl;
+  text-align: right;
   font-family:
     Vazirmatn,
     IRANSans,
@@ -31,6 +32,7 @@
   max-height: calc(100vh - 120px);
   overflow: auto;
   overflow-x: hidden;
+  text-align: right;
   background: #f8faf9;
   border: 1px solid #d7dfdc;
   border-radius: 8px;
@@ -42,6 +44,7 @@
   max-width: 420px;
   padding: 14px;
   background: #f8faf9;
+  text-align: right;
 }
 
 .ibnav-header {
@@ -107,6 +110,9 @@
 }
 
 .ibnav-input {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: plaintext;
   width: 100%;
   box-sizing: border-box;
   border: 1px solid #cbd5d1;
@@ -168,6 +174,7 @@
 .ibnav-row {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   font-size: 13px;
   min-width: 0;
@@ -179,6 +186,8 @@
 }
 
 .ibnav-row strong {
+  direction: ltr;
+  unicode-bidi: plaintext;
   color: #0f766e;
   font-size: 14px;
 }
@@ -210,6 +219,9 @@
 }
 
 .ibnav-link {
+  direction: ltr;
+  display: inline-block;
+  unicode-bidi: plaintext;
   color: #0f766e;
   font-size: 12px;
   text-decoration: none;
@@ -239,6 +251,8 @@
 }
 
 .ibnav-diagnostics {
+  direction: rtl;
+  text-align: right;
   display: grid;
   gap: 7px;
   border: 1px dashed #b7c7c2;
@@ -297,6 +311,8 @@
   min-height: 150px;
   resize: vertical;
   direction: ltr;
+  text-align: left;
+  unicode-bidi: plaintext;
   font: 11px/1.6 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   border: 1px solid #a7b7b2;
   border-radius: 6px;
@@ -307,6 +323,7 @@
 
 .ibnav-apply {
   justify-self: start;
+  white-space: normal;
   border: 1px solid #0f766e;
   border-radius: 6px;
   background: #ffffff;

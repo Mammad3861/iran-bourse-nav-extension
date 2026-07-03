@@ -314,7 +314,7 @@ export function candidateAvailabilityForSmoke(input: {
   const status = parserDataStatusFor(input);
   if (!status) return undefined;
   if (!input.parseResult) return status === 'unavailable-network-error' ? 'unavailable-network-error' : undefined;
-  return input.parseResult.diagnostics.candidateAvailability ?? candidateAvailabilityFor(input.parseResult, status);
+  return candidateAvailabilityFor(input.parseResult, status);
 }
 
 export const parsedCacheWarnings = {

@@ -375,6 +375,50 @@ describe('smoke summary', () => {
     expect((summary.userFacingWarnings as string[]).join(' ')).toContain('کاندیدهای کدال بررسی نشدند');
   });
 
+  it('reports total-share-only parser output as basic candidates, not NAV candidates', () => {
+    const parsed = parseResult();
+    parsed.extractedValues = [
+      {
+        kind: 'totalSharesSuggestion',
+        label: 'تعداد کل سهام',
+        value: 9_000_000_000,
+        rawText: '9000000000',
+        confidence: 'medium',
+        sourceTableIndex: -1
+      }
+    ];
+    parsed.primarySuggestions = [];
+    parsed.secondarySuggestions = [];
+    parsed.diagnostics.rejectedCandidates = [];
+    parsed.diagnostics.sourceStrategy = {
+      htmlDetailChecked: true,
+      reconstructedTableChecked: true,
+      excel: { status: 'not-requested', tableCount: 0 },
+      alternativeReportsChecked: false,
+      marketValueStatus: 'not-found',
+      messages: []
+    };
+    parsed.diagnostics.candidateAvailability = 'live-nav-candidates';
+
+    const summary = createSmokeSummary({
+      symbol: 'فملی',
+      instrumentName: 'ملی صنایع مس ایران',
+      currentPriceSource: 'dom-latest-trade',
+      parseResult: parsed,
+      support: {
+        status: 'unknown',
+        reasons: ['برای تشخیص نوع نماد داده کافی وجود ندارد.']
+      }
+    });
+
+    expect(summary).toMatchObject({
+      holdingSupport: { status: 'unknown' },
+      marketValueStatus: 'not-found',
+      candidateAvailability: 'live-basic-candidates-only',
+      extractedCandidates: [expect.objectContaining({ kind: 'totalSharesSuggestion' })]
+    });
+  });
+
   it('marks subsidiary financial reports as issuer mismatch in smoke summaries', () => {
     const summary = createSmokeSummary({
       symbol: 'فولاد',
