@@ -249,9 +249,79 @@ describe('smoke summary', () => {
 
     expect(JSON.parse(text)).toMatchObject({
       symbol: 'فولاد',
+      fetchCacheStatus: {
+        status: 'not-attempted'
+      },
       holdingSupport: {
         status: 'unsupported'
       }
+    });
+  });
+
+  it('does not omit parser status fields when parsing has not run yet', () => {
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      discovery: discovery()
+    });
+
+    expect(summary).toMatchObject({
+      codalDiscoveryStatus: 'found',
+      parserDataStatus: 'not-attempted',
+      candidateAvailability: 'not-attempted',
+      fetchCacheStatus: {
+        status: 'found',
+        liveFetch: expect.objectContaining({ status: 'found' })
+      }
+    });
+  });
+
+  it('keeps equity suggestion diagnostic metadata in compact smoke candidates', () => {
+    const parsed = parseResult();
+    parsed.extractedValues = [
+      {
+        kind: 'equitySuggestion',
+        label: 'حقوق صاحبان سهام',
+        value: 3_000_000_000,
+        rawText: '۳۰۰۰',
+        rawValue: 3000,
+        confidence: 'low',
+        unit: 'نامشخص',
+        unitMultiplier: 1,
+        sourceTableIndex: 7,
+        rowLabel: 'جمع حقوق مالکانه',
+        columnLabel: 'دوره جاری / سال مالی منتهی به 1404/12/29',
+        periodMatchStatus: 'exact-current-period',
+        unitDetectionStatus: 'unknown',
+        tableContextStatus: 'balance-sheet-strong',
+        confidenceReason: 'row=exact-total; period=exact-current-period; unit=unknown; table=balance-sheet-strong',
+        warning: 'واحد صورت مالی با اطمینان تشخیص داده نشد؛ مقدار خام بدون مقیاس‌گذاری پیشنهاد شده است.'
+      }
+    ];
+
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      parseResult: parsed
+    });
+
+    expect(summary).toMatchObject({
+      extractedCandidates: [
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          value: 3_000_000_000,
+          rawValue: 3000,
+          unit: 'نامشخص',
+          unitMultiplier: 1,
+          rowLabel: 'جمع حقوق مالکانه',
+          columnLabel: 'دوره جاری / سال مالی منتهی به 1404/12/29',
+          periodMatchStatus: 'exact-current-period',
+          unitDetectionStatus: 'unknown',
+          tableContextStatus: 'balance-sheet-strong',
+          warnings: [expect.stringContaining('واحد صورت مالی')],
+          confidenceReason: expect.stringContaining('unit=unknown')
+        })
+      ]
     });
   });
 

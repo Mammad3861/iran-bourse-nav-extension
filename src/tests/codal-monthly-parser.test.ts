@@ -1031,7 +1031,8 @@ describe('parseMonthlyActivityReport', () => {
         expect.objectContaining({
           kind: 'equitySuggestion',
           value: 123_456_000_000,
-          confidence: 'high'
+          confidence: 'medium',
+          periodMatchStatus: 'current-period-inferred'
         })
       ])
     );
@@ -1087,7 +1088,7 @@ describe('parseMonthlyActivityReport', () => {
     );
   });
 
-  it('extracts owner-equity total rows with clear units as high-confidence equity suggestions', () => {
+  it('extracts owner-equity total rows with clear units as medium-confidence inferred-period equity suggestions', () => {
     const result = parseFinancialStatementReport(
       detail({
         title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
@@ -1130,9 +1131,10 @@ describe('parseMonthlyActivityReport', () => {
         expect.objectContaining({
           kind: 'equitySuggestion',
           value: 3000,
-          confidence: 'high',
+          confidence: 'medium',
           unit: 'ریال',
-          rowLabel: 'جمع حقوق مالکانه'
+          rowLabel: 'جمع حقوق مالکانه',
+          periodMatchStatus: 'current-period-inferred'
         })
       ])
     );
@@ -1228,12 +1230,117 @@ describe('parseMonthlyActivityReport', () => {
           rawValue: 3000,
           value: 3_000_000_000,
           period: '1404/12/29',
-          confidence: 'high'
+          confidence: 'high',
+          columnLabel: '1404/12/29',
+          periodMatchStatus: 'exact-current-period',
+          unitDetectionStatus: 'detected',
+          tableContextStatus: 'balance-sheet-strong'
         })
       ])
     );
     expect(result.extractedValues).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion', rawValue: 9999 })])
+    );
+  });
+
+  it('does not mix row numeric values into multi-row equity column labels', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'ارقام به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی',
+            headers: ['شرح', 'دوره جاری', 'تجدید ارائه شده سال مالی منتهی به'],
+            rows: [
+              ['شرح', 'دوره جاری', 'تجدید ارائه شده سال مالی منتهی به'],
+              ['', 'سال مالی منتهی به ۱۴۰۴/۱۲/۲۹', 'سال مالی منتهی به ۱۴۰۳/۱۲/۳۰'],
+              ['دارایی‌ها', '۵۰۰۰', '۴۰۰۰'],
+              ['بدهی‌ها', '۲۰۰۰', '۱۰۰۰'],
+              ['جمع حقوق مالکانه', '۳۰۰۰', '۱,۱۷۵,۶۰۹']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    const equity = result.extractedValues.find((value) => value.kind === 'equitySuggestion');
+    expect(equity).toEqual(
+      expect.objectContaining({
+        rawValue: 3000,
+        columnLabel: 'دوره جاری / سال مالی منتهی به 1404/12/29',
+        periodMatchStatus: 'exact-current-period',
+        unit: 'میلیون ریال'
+      })
+    );
+    expect(equity?.columnLabel).not.toContain('1,175,609');
+  });
+
+  it('downgrades restated-only equity columns and labels the period status', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی',
+            headers: ['شرح', 'تجدید ارائه شده سال مالی منتهی به ۱۴۰۳/۱۲/۳۰'],
+            rows: [
+              ['شرح', 'تجدید ارائه شده سال مالی منتهی به ۱۴۰۳/۱۲/۳۰'],
+              ['دارایی‌ها', '۴۰۰۰'],
+              ['بدهی‌ها', '۱۰۰۰'],
+              ['جمع حقوق صاحبان سهام', '۳۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          confidence: 'low',
+          periodMatchStatus: 'prior-or-restated',
+          warning: expect.stringContaining('تجدید ارائه')
+        })
+      ])
     );
   });
 
@@ -1392,6 +1499,131 @@ describe('parseMonthlyActivityReport', () => {
     );
     expect(merged.diagnostics.tables.map((table) => table.sourceGroup)).toEqual(
       expect.arrayContaining(['monthly', 'financial'])
+    );
+  });
+
+  it('keeps monthly and TSETMC total-share candidates when financial parsing is unsupported', () => {
+    const monthly = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس - مبالغ به میلیون ریال</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش بازار</th></tr>
+            <tr><td>جمع</td><td>۱۰۰</td><td>۱۵۰</td></tr>
+          </table>
+        `
+      })
+    );
+    const financial = parseFinancialStatementReport(
+      detail({
+        title: 'توضیحات در خصوص اطلاعات و صورت های مالی منتشر شده',
+        extractedTables: [
+          {
+            index: 7,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [['جمع حقوق صاحبان سهام', '۲۰۰']]
+          }
+        ]
+      })
+    );
+    const totalShares: ReturnType<typeof mergeMonthlyActivityParseResults> = {
+      status: 'parsed',
+      reportTitle: 'TSETMC instrument info',
+      tableCandidates: [],
+      extractedValues: [
+        {
+          kind: 'totalSharesSuggestion',
+          label: 'تعداد کل سهام',
+          value: 9_000_000_000,
+          rawText: '9000000000',
+          confidence: 'medium',
+          unit: 'سهم',
+          unitMultiplier: 1,
+          sourceTableIndex: -1
+        }
+      ],
+      primarySuggestions: [],
+      secondarySuggestions: [],
+      tablePreviews: [],
+      diagnostics: {
+        detectedTableCount: 0,
+        parserStatus: 'parsed',
+        parserWarnings: [],
+        extractedCandidates: [],
+        rejectedCandidates: [],
+        tables: []
+      },
+      warnings: [],
+      parsedAt: '2026-07-05T00:00:00.000Z'
+    };
+
+    const merged = mergeMonthlyActivityParseResults([monthly, financial, totalShares]);
+
+    expect(merged.diagnostics.parserDataStatus).toBe('live');
+    expect(merged.diagnostics.candidateAvailability).toBe('live-nav-candidates');
+    expect(merged.extractedValues.map((value) => value.kind)).toEqual(
+      expect.arrayContaining(['listedPortfolioCostValue', 'listedPortfolioMarketValue', 'totalSharesSuggestion'])
+    );
+    expect(merged.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
+    );
+  });
+
+  it('keeps monthly candidates when a financial report is rejected as issuer mismatch', () => {
+    const monthly = parseMonthlyActivityReport(
+      detail({
+        rawHtml: `
+          <table>
+            <caption>پرتفوی بورسی پذیرفته شده در بورس - مبالغ به میلیون ریال</caption>
+            <tr><th>شرح</th><th>بهای تمام شده</th><th>ارزش بازار</th></tr>
+            <tr><td>جمع</td><td>۲۷۵</td><td>۳۱۰</td></tr>
+          </table>
+        `
+      })
+    );
+    const financial = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت دیگر)',
+        extractedTables: [
+          {
+            index: 7,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی - مبالغ به میلیون ریال',
+            headers: ['شرح', 'دوره جاری'],
+            rows: [['جمع حقوق صاحبان سهام', '۲۰۰']]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وغدیر',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'low',
+          selectedWarnings: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'],
+          candidates: [
+            {
+              report: { symbol: 'وغدیر', title: 'اطلاعات و صورت‌های مالی میاندوره‌ای دوره ۶ ماهه منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت دیگر)' },
+              score: -75,
+              selected: true,
+              reasons: [],
+              warnings: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'],
+              rejectedReasons: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.']
+            }
+          ]
+        }
+      })
+    );
+
+    const merged = mergeMonthlyActivityParseResults([monthly, financial]);
+
+    expect(merged.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'listedPortfolioCostValue', value: 275_000_000 }),
+        expect.objectContaining({ kind: 'listedPortfolioMarketValue', value: 310_000_000 })
+      ])
+    );
+    expect(merged.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
     );
   });
 });
