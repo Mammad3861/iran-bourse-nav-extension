@@ -7,11 +7,14 @@
 - Safer equity extraction from valid issuer-level Codal financial statements.
 - Conservative `equitySuggestion` candidates from true total-equity rows only.
 - Smoke Summary `equitySource` when an equity suggestion is applied.
+- Smoke Summary readiness fields for pending, ready, failed, stale-cache, and no-report parser states.
+- Compact widget progress state for Codal detail fetch and parser completion.
 
 ### Changed
 
 - Rejects component equity rows and liabilities-plus-equity totals as equity suggestions.
 - Downgrades consolidated, unknown-unit, or period-ambiguous equity candidates for manual review.
+- Marks early Smoke copies as pending instead of silently showing incomplete not-attempted parser output.
 
 ## 0.1.0-alpha.1
 

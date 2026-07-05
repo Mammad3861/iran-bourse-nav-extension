@@ -30,7 +30,7 @@ import { manualReviewMarketValueSummary } from '../data/market-value-review';
 import type { ManualOverrideRecord, ManualValueSourceMetadata } from '../data/manual-overrides';
 import { manualFieldMetadata, normalizeManualOverrideRecord } from '../data/manual-overrides';
 import { buildNavCompletionSummary, navCompletionFieldLabels } from '../data/nav-completion';
-import { smokeSummaryText } from '../data/smoke-summary';
+import { smokeSummaryText, type DetailPipelineStatus } from '../data/smoke-summary';
 import { classifyHoldingSupport, type HoldingSupportClassification } from '../data/symbol-classification';
 import {
   applySuggestionToRecord,
@@ -363,6 +363,53 @@ function detailStatusText(result: CodalReportDetailResult): string {
     return 'دریافت جزئیات گزارش به پایان مهلت رسید';
   }
   return `خطا در دریافت جزئیات: ${result.errorMessage ?? 'نامشخص'}`;
+}
+
+function detailPipelineStatusText(status: DetailPipelineStatus): string {
+  switch (status) {
+    case 'fetching-detail':
+      return 'در حال دریافت جزئیات گزارش کدال...';
+    case 'parsing':
+      return 'در حال تحلیل جدول‌های گزارش...';
+    case 'completed':
+      return 'تحلیل گزارش کامل شد.';
+    case 'failed':
+      return 'تحلیل گزارش ناموفق بود؛ جزئیات خطا را بررسی کنید.';
+    case 'stale-cache-used':
+      return 'داده زنده دریافت نشد؛ نتیجه ذخیره‌شده نمایش داده شده است.';
+    case 'not-started':
+    default:
+      return 'تحلیل گزارش هنوز شروع نشده است.';
+  }
+}
+
+function smokeReadinessHint(status: DetailPipelineStatus): string {
+  if (status === 'fetching-detail' || status === 'parsing') {
+    return 'تحلیل گزارش هنوز کامل نشده است؛ چند لحظه صبر کنید و دوباره Smoke بگیرید.';
+  }
+  if (status === 'failed') {
+    return 'Smoke ممکن است ناقص باشد؛ دریافت یا تحلیل جزئیات گزارش ناموفق بود.';
+  }
+  if (status === 'stale-cache-used') {
+    return 'Smoke با نتیجه ذخیره‌شده تهیه می‌شود؛ داده‌ها زنده نیستند.';
+  }
+  if (status === 'not-started') {
+    return 'Smoke هنوز آماده نیست؛ ابتدا دریافت و تحلیل جزئیات گزارش باید انجام شود.';
+  }
+  return 'Smoke آماده است.';
+}
+
+function updateDetailPipelineUi(root: HTMLElement, status: DetailPipelineStatus): void {
+  const progress = root.querySelector<HTMLElement>('[data-ibnav-codal-detail="pipeline"]');
+  const smokeHint = root.querySelector<HTMLElement>('[data-ibnav-smoke-readiness]');
+  if (progress) {
+    progress.textContent = detailPipelineStatusText(status);
+    progress.dataset.state = status;
+  }
+  if (smokeHint) {
+    smokeHint.textContent = smokeReadinessHint(status);
+    smokeHint.dataset.state = status === 'completed' ? 'ok' : 'warning';
+  }
 }
 
 function renderCodalDetail(root: HTMLElement, result: CodalReportDetailResult): void {
@@ -1253,10 +1300,27 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   let latestParseResult: MonthlyActivityParseResult | undefined;
   let latestDiscoveryResult: CodalReportDiscoveryResult | undefined;
   let latestSupport: HoldingSupportClassification | undefined;
+  const root = (document.getElementById(WIDGET_ROOT_ID) as HTMLElement | null) ?? document.createElement('section');
+  let detailPipelineStatus: DetailPipelineStatus = 'not-started';
+  let latestDetailStatusText: string | undefined;
+  let parserStartedAt: string | undefined;
+  let parserCompletedAt: string | undefined;
+  let parserError: string | undefined;
+  const setDetailPipelineStatus = (status: DetailPipelineStatus, options?: { detailText?: string; error?: string }): void => {
+    detailPipelineStatus = status;
+    latestDetailStatusText = options?.detailText ?? detailPipelineStatusText(status);
+    parserError = options?.error;
+    if (status === 'parsing' && !parserStartedAt) {
+      parserStartedAt = new Date().toISOString();
+    }
+    if (status === 'completed' || status === 'failed' || status === 'stale-cache-used') {
+      parserCompletedAt = new Date().toISOString();
+    }
+    updateDetailPipelineUi(root, status);
+  };
   const inputs = activeRecord?.inputs ?? emptyNavInputs();
   inputs.currentPrice = inputs.currentPrice ?? options.currentPrice;
 
-  const root = (document.getElementById(WIDGET_ROOT_ID) as HTMLElement | null) ?? document.createElement('section');
   root.id = WIDGET_ROOT_ID;
   root.className = 'ibnav-root ibnav-widget';
   root.innerHTML = `
@@ -1308,7 +1372,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         <div data-ibnav-codal="diagnostics"></div>
         <button type="button" class="ibnav-save ibnav-secondary" data-ibnav-codal-connection-copy>کپی وضعیت اتصال کدال</button>
         <button type="button" class="ibnav-save ibnav-secondary" data-ibnav-smoke-copy>کپی خلاصه Smoke Test</button>
+        <p class="ibnav-muted" data-ibnav-smoke-readiness>Smoke هنوز آماده نیست؛ ابتدا دریافت و تحلیل جزئیات گزارش باید انجام شود.</p>
         <div class="ibnav-row"><span>جزئیات آخرین گزارش</span><span data-ibnav-codal-detail="status">در انتظار نتیجه جستجو</span></div>
+        <div class="ibnav-row"><span>وضعیت تحلیل</span><span data-ibnav-codal-detail="pipeline">تحلیل گزارش هنوز شروع نشده است.</span></div>
         <div class="ibnav-row"><span>زمان دریافت جزئیات</span><span data-ibnav-codal-detail="fetchedAt">-</span></div>
         <p class="ibnav-muted" data-ibnav-codal-detail="warning">ساختار گزارش ممکن است در این نسخه پشتیبانی نشود.</p>
         <div class="ibnav-suggestions">
@@ -1329,6 +1395,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
 
   const updatedAt = activeRecord ? formatPersianTimestamp(new Date(activeRecord.updatedAt)) : formatPersianTimestamp();
   updateResults(root, updatedAt);
+  updateDetailPipelineUi(root, detailPipelineStatus);
   updateResetCodalButton(root, activeRecord);
   updateFieldSourceBadges(root, activeRecord);
   if (initialStorageWarning) {
@@ -1349,6 +1416,12 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
             reportTitle: discovery.monthlyActivityReport?.title,
             warning: reason
           });
+      setDetailPipelineStatus(cached ? 'stale-cache-used' : 'failed', {
+        error: cached ? undefined : reason,
+        detailText: cached
+          ? 'داده زنده دریافت نشد؛ نتیجه ذخیره‌شده نمایش داده شده است.'
+          : 'تحلیل گزارش ناموفق بود؛ جزئیات خطا را بررسی کنید.'
+      });
       latestSupport = classifyHoldingSupport({
         instrumentName: options.instrumentName,
         discovery,
@@ -1363,6 +1436,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     };
 
     if (!codalSymbolValidation.valid || !codalSymbolValidation.symbol) {
+      setDetailPipelineStatus('not-started');
       renderCodalDiscovery(root, {
         status: 'not-found',
         symbol: options.symbol,
@@ -1387,6 +1461,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         (report): report is CodalReportReference => Boolean(report)
       );
       if (reports.length === 0) {
+        setDetailPipelineStatus('completed', { detailText: 'گزارش قابل بررسی برای تحلیل پیدا نشد.' });
         renderCodalDetail(root, {
           status: result.status === 'network-error' || result.status === 'cors-blocked' || result.status === 'parse-error' ? 'network-error' : 'unavailable',
           errorMessage: result.errorMessage
@@ -1402,6 +1477,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
 
       const parseResults: MonthlyActivityParseResult[] = [];
       let renderedDetail = false;
+      setDetailPipelineStatus('fetching-detail');
       const uniqueReports = reports.filter(
         (report, index, all) =>
           all.findIndex((candidate) => (candidate.url ?? candidate.tracingNo ?? candidate.title) === (report.url ?? report.tracingNo ?? report.title)) === index
@@ -1415,6 +1491,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
             renderedDetail = true;
           }
           if (detailResult.detail) {
+            setDetailPipelineStatus('parsing', { detailText: 'در حال تحلیل جدول‌های گزارش...' });
             parseResults.push(
               report === result.financialStatementReport
                 ? parseFinancialStatementReport(detailResult.detail)
@@ -1424,10 +1501,12 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         } catch (error) {
           if (!isActiveWidgetRender(root, renderId)) return;
           if (!renderedDetail) {
+            const message = userFacingErrorMessage(error, 'خطای نامشخص در دریافت جزئیات کدال');
             renderCodalDetail(root, {
               status: 'network-error',
-              errorMessage: userFacingErrorMessage(error, 'خطای نامشخص در دریافت جزئیات کدال')
+              errorMessage: message
             });
+            setDetailPipelineStatus('failed', { error: message });
             renderedDetail = true;
           }
         }
@@ -1445,6 +1524,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         }
           const mergedResult = mergeMonthlyActivityParseResults(parseResults);
           latestParseResult = result.status === 'stale-cache' ? markParseResultStale(mergedResult, result.cachedAt) : mergedResult;
+          setDetailPipelineStatus(result.status === 'stale-cache' ? 'stale-cache-used' : 'completed');
           if (result.status !== 'stale-cache') {
             await saveParsedCodalSummary({
               symbol: options.symbol,
@@ -1473,6 +1553,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           reportTitle: result.monthlyActivityReport?.title ?? result.financialStatementReport?.title,
           warning: 'گزارش‌های کدال دریافت شدند، اما جزئیات قابل استخراج برای کاندیدهای NAV پیدا نشد.'
         });
+        setDetailPipelineStatus('completed', { detailText: 'تحلیل گزارش کامل شد؛ کاندید قابل اتکایی پیدا نشد.' });
         latestSupport = classifyHoldingSupport({
           instrumentName: options.instrumentName,
           discovery: result,
@@ -1488,6 +1569,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     } catch (error: unknown) {
       if (!isActiveWidgetRender(root, renderId)) return;
       const message = userFacingErrorMessage(error, 'خطای نامشخص در دریافت کدال');
+      setDetailPipelineStatus('failed', { error: message });
       renderCodalDiscovery(root, {
         status: 'network-error',
         symbol: options.symbol,
@@ -1523,7 +1605,11 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
         cachedAt: latestDiscoveryResult?.cachedAt,
         attemptCount: latestDiscoveryResult?.attemptCount ?? latestDiscoveryResult?.diagnostics?.liveFetch?.attemptCount,
         parserDataStatus: parserDataStatusFor({ discovery: latestDiscoveryResult, parseResult: latestParseResult }),
-        staleParsedCacheUsed: latestParseResult?.diagnostics.staleParsedCacheUsed ?? false
+        staleParsedCacheUsed: latestParseResult?.diagnostics.staleParsedCacheUsed ?? false,
+        detailPipelineStatus,
+        parserStartedAt,
+        parserCompletedAt,
+        parserError
       },
       null,
       2
@@ -1552,7 +1638,12 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
       discovery: latestDiscoveryResult,
       parseResult: latestParseResult,
       navCompletion: completion,
-      support: latestSupport
+      support: latestSupport,
+      detailPipelineStatus,
+      detailStatusText: latestDetailStatusText,
+      parserStartedAt,
+      parserCompletedAt,
+      parserError
     });
     const fallbackContainer =
       root.querySelector<HTMLElement>('[data-ibnav-codal="diagnostics"]') ??

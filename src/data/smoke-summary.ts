@@ -11,6 +11,15 @@ import type { ManualOverrideRecord, ManualValueSourceKind } from './manual-overr
 import type { NavCompletionSummary } from './nav-completion';
 import type { HoldingSupportClassification } from './symbol-classification';
 
+export type SmokeReadiness = 'ready' | 'pending' | 'failed' | 'stale-cache' | 'no-report';
+export type DetailPipelineStatus =
+  | 'not-started'
+  | 'fetching-detail'
+  | 'parsing'
+  | 'completed'
+  | 'failed'
+  | 'stale-cache-used';
+
 export interface SmokeSummaryInput {
   symbol: string;
   instrumentName?: string;
@@ -23,6 +32,11 @@ export interface SmokeSummaryInput {
   parseResult?: MonthlyActivityParseResult;
   navCompletion?: NavCompletionSummary;
   support?: HoldingSupportClassification;
+  detailPipelineStatus?: DetailPipelineStatus;
+  detailStatusText?: string;
+  parserStartedAt?: string;
+  parserCompletedAt?: string;
+  parserError?: string;
 }
 
 function normalizedSourceFor(
@@ -150,9 +164,36 @@ function financialReportSummary(
   };
 }
 
+function smokeReadinessFor(input: SmokeSummaryInput, parserDataStatus: string): SmokeReadiness {
+  if (input.detailPipelineStatus === 'failed' || parserDataStatus === 'unavailable-network-error') return 'failed';
+  if (input.detailPipelineStatus === 'stale-cache-used' || parserDataStatus === 'stale-cache') return 'stale-cache';
+  if (input.parseResult || input.detailPipelineStatus === 'completed') return 'ready';
+  if (input.detailPipelineStatus === 'fetching-detail' || input.detailPipelineStatus === 'parsing') return 'pending';
+  if (input.discovery?.monthlyActivityReport || input.discovery?.financialStatementReport) return 'pending';
+  return 'no-report';
+}
+
+function smokeReadinessWarning(readiness: SmokeReadiness): string | undefined {
+  if (readiness === 'pending') {
+    return 'تحلیل گزارش هنوز کامل نشده است؛ این Smoke Summary ممکن است ناقص باشد.';
+  }
+  if (readiness === 'failed') {
+    return 'دریافت یا تحلیل جزئیات گزارش ناموفق بود؛ خطا و وضعیت اتصال را بررسی کنید.';
+  }
+  if (readiness === 'stale-cache') {
+    return parsedCacheWarnings.stale;
+  }
+  if (readiness === 'no-report') {
+    return 'گزارش قابل بررسی برای Smoke پیدا نشده یا جستجو هنوز انجام نشده است.';
+  }
+  return undefined;
+}
+
 export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unknown> {
   const monthly = input.discovery?.diagnostics?.monthlyActivity;
   const parserDataStatus = parserDataStatusFor({ discovery: input.discovery, parseResult: input.parseResult });
+  const smokeReadiness = smokeReadinessFor(input, parserDataStatus);
+  const readinessWarning = smokeReadinessWarning(smokeReadiness);
   const candidateAvailability = candidateAvailabilityForSmoke({
     discovery: input.discovery,
     parseResult: input.parseResult
@@ -179,6 +220,13 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     totalShares: input.record?.inputs.totalShares,
     totalSharesSource: normalizedSourceFor(input.record, 'totalShares'),
     codalDiscoveryStatus: input.discovery?.status,
+    smokeReadiness,
+    smokeReadinessWarning: readinessWarning,
+    detailPipelineStatus: input.detailPipelineStatus ?? (input.parseResult ? 'completed' : 'not-started'),
+    detailStatusText: input.detailStatusText,
+    parserStartedAt: input.parserStartedAt,
+    parserCompletedAt: input.parserCompletedAt,
+    parserError: input.parserError,
     parserDataStatus,
     staleParsedCacheUsed: input.parseResult?.diagnostics.staleParsedCacheUsed ?? false,
     parsedCacheCachedAt: input.parseResult?.diagnostics.parsedCacheCachedAt,
@@ -206,6 +254,7 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     missingFields: input.navCompletion?.navTotalMissingFields ?? [],
     navShareMissingFields: input.navCompletion?.navShareMissingFields ?? [],
     userFacingWarnings: [
+      ...(readinessWarning ? [readinessWarning] : []),
       ...(parserDataStatus === 'stale-cache' ? [parsedCacheWarnings.stale] : []),
       ...(parserDataStatus === 'unavailable-network-error' ? [parsedCacheWarnings.unavailableNetwork] : []),
       ...(input.parseResult?.warnings.slice(0, 8) ?? []),

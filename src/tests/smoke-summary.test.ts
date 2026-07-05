@@ -218,6 +218,8 @@ describe('smoke summary', () => {
       insCode: '37204371816016200',
       currentPrice: 17_070,
       currentPriceSource: 'dom-latest-trade',
+      smokeReadiness: 'ready',
+      detailPipelineStatus: 'completed',
       totalSharesSource: 'tsetmc-suggestion',
       codalDiscoveryStatus: 'found',
       marketValueStatus: 'ambiguous',
@@ -258,15 +260,20 @@ describe('smoke summary', () => {
     });
   });
 
-  it('does not omit parser status fields when parsing has not run yet', () => {
+  it('marks smoke as pending when reports are found but parsing has not finished', () => {
     const summary = createSmokeSummary({
       symbol: 'وصندوق',
       currentPriceSource: 'unknown',
-      discovery: discovery()
+      discovery: discovery(),
+      detailPipelineStatus: 'fetching-detail',
+      parserStartedAt: '2026-07-02T00:00:00.000Z'
     });
 
     expect(summary).toMatchObject({
       codalDiscoveryStatus: 'found',
+      smokeReadiness: 'pending',
+      smokeReadinessWarning: 'تحلیل گزارش هنوز کامل نشده است؛ این Smoke Summary ممکن است ناقص باشد.',
+      detailPipelineStatus: 'fetching-detail',
       parserDataStatus: 'not-attempted',
       candidateAvailability: 'not-attempted',
       fetchCacheStatus: {
@@ -274,6 +281,69 @@ describe('smoke summary', () => {
         liveFetch: expect.objectContaining({ status: 'found' })
       }
     });
+  });
+
+  it('marks completed no-candidate parser output as ready, not silently not-attempted', () => {
+    const parsed = parseResult();
+    parsed.extractedValues = [];
+    parsed.secondarySuggestions = [];
+    parsed.diagnostics.extractedCandidates = [];
+    parsed.diagnostics.rejectedCandidates = [];
+    parsed.diagnostics.sourceStrategy = {
+      htmlDetailChecked: true,
+      reconstructedTableChecked: true,
+      alternativeReportsChecked: false,
+      marketValueStatus: 'not-found',
+      messages: [],
+      excel: { status: 'not-requested', tableCount: 0 }
+    };
+
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      discovery: discovery(),
+      parseResult: parsed,
+      detailPipelineStatus: 'completed'
+    });
+
+    expect(summary).toMatchObject({
+      smokeReadiness: 'ready',
+      detailPipelineStatus: 'completed',
+      parserDataStatus: 'live',
+      candidateAvailability: 'no-nav-candidates-live',
+      extractedCandidates: []
+    });
+  });
+
+  it('marks detail failures as failed and keeps the parser error visible', () => {
+    const failedDiscovery = discovery();
+    failedDiscovery.status = 'network-error';
+    failedDiscovery.errorStatus = 'network-error';
+    failedDiscovery.errorMessage = 'Failed to fetch detail';
+    failedDiscovery.diagnostics!.liveFetch = {
+      status: 'network-error',
+      errorMessage: 'Failed to fetch detail',
+      attemptCount: 1,
+      domain: 'codal.ir',
+      usedCache: false
+    };
+
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      discovery: failedDiscovery,
+      detailPipelineStatus: 'failed',
+      parserError: 'Failed to fetch detail'
+    });
+
+    expect(summary).toMatchObject({
+      smokeReadiness: 'failed',
+      detailPipelineStatus: 'failed',
+      parserDataStatus: 'unavailable-network-error',
+      candidateAvailability: 'unavailable-network-error',
+      parserError: 'Failed to fetch detail'
+    });
+    expect((summary.userFacingWarnings as string[]).join(' ')).toContain('ناموفق بود');
   });
 
   it('keeps equity suggestion diagnostic metadata in compact smoke candidates', () => {
@@ -394,6 +464,7 @@ describe('smoke summary', () => {
       currentPriceSource: 'unknown',
       discovery: staleDiscovery,
       parseResult: parsed,
+      detailPipelineStatus: 'stale-cache-used',
       support: {
         status: 'likely-holding',
         reasons: ['نام ابزار شبیه شرکت سرمایه‌گذاری/هلدینگ است.']
@@ -402,6 +473,8 @@ describe('smoke summary', () => {
 
     expect(summary).toMatchObject({
       codalDiscoveryStatus: 'stale-cache',
+      smokeReadiness: 'stale-cache',
+      detailPipelineStatus: 'stale-cache-used',
       parserDataStatus: 'stale-cache',
       staleParsedCacheUsed: true,
       parsedCacheCachedAt: '2026-07-02T00:00:00.000Z',
@@ -542,9 +615,11 @@ describe('smoke summary', () => {
         confidence: 'none',
         issuerMatchStatus: 'subsidiary-or-other-company',
         rejectionReason: 'عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.'
-      },
-      userFacingWarnings: ['گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد.']
+      }
     });
+    expect(summary.userFacingWarnings).toEqual(
+      expect.arrayContaining(['گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد.'])
+    );
   });
 
   it('does not report exact-symbol issuer status for unselected weak-name financial candidates', () => {

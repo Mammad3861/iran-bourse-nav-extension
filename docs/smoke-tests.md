@@ -30,7 +30,17 @@ Use these symbols before handing an alpha build to manual testers. Live Codal/TS
 
 ## Compact Smoke Summary
 
-Use `کپی خلاصه Smoke Test` after Codal checks finish. The copied JSON should include compact public/debug fields only:
+Use `کپی خلاصه Smoke Test` after Codal checks finish. Wait until `جزئیات آخرین گزارش` and `وضعیت تحلیل` show that report analysis completed before treating Smoke as final acceptance evidence. If Smoke is copied earlier, the JSON must explicitly show pending readiness.
+
+Readiness fields:
+
+- `smokeReadiness: "ready"` means detail fetch/parser work completed. Candidate fields can be used for manual acceptance review.
+- `smokeReadiness: "pending"` means report detail fetch or parser work has not finished. This Smoke is incomplete and should not be used as final manual acceptance evidence.
+- `smokeReadiness: "failed"` means detail fetch/parser work failed. Review connection/parser diagnostics before judging candidates.
+- `smokeReadiness: "stale-cache"` means live Codal failed and a cached parser result is shown.
+- `smokeReadiness: "no-report"` means no report was available or Codal discovery has not produced a report.
+
+The copied JSON should include compact public/debug fields only:
 
 - symbol, instrument name, InsCode, Codal symbol
 - current price and source
@@ -41,8 +51,9 @@ Use `کپی خلاصه Smoke Test` after Codal checks finish. The copied JSON sh
 - extracted suggestion candidates
 - NAV completion status and missing fields
 - live fetch/cache status
-- parser data status: `live`, `stale-cache`, or `unavailable-network-error`
-- candidate availability: `live-nav-candidates`, `live-basic-candidates-only`, `no-nav-candidates-live`, `stale-candidates`, or `unavailable-network-error`
+- detail pipeline status: `not-started`, `fetching-detail`, `parsing`, `completed`, `failed`, or `stale-cache-used`
+- parser data status: `live`, `stale-cache`, `unavailable-network-error`, or `not-attempted`
+- candidate availability: `live-nav-candidates`, `live-basic-candidates-only`, `no-nav-candidates-live`, `stale-candidates`, `unavailable-network-error`, or `not-attempted`
 
 For `وصندوق`, TSETMC-provided/applied total shares should appear as `totalSharesSource: "tsetmc-suggestion"` even if older saved metadata used `codal-suggestion` with `TSETMC instrument info`.
 
@@ -50,6 +61,7 @@ When live Codal fetch fails, check these fields carefully:
 
 - `parserDataStatus: "stale-cache"` means live Codal failed but a compact parsed summary from the last successful run is being shown. Candidate counts and extracted candidates are stale and require manual review.
 - `parserDataStatus: "unavailable-network-error"` means live Codal failed and no parsed summary cache was available. Empty candidates in this state mean "not checked", not "none exist".
+- `parserDataStatus: "not-attempted"` should appear only before the detail/parser pipeline has completed. If reports were found, check `smokeReadiness`; `pending` means the tester copied too early.
 - Smoke Summary recomputes `candidateAvailability` from the current parsed candidates. An older embedded parser diagnostic value must not make total-share-only output look like `live-nav-candidates`.
 - `candidateAvailability: "live-basic-candidates-only"` means only basic suggestions such as total shares were found, not NAV portfolio/equity candidates.
 - `candidateAvailability: "no-nav-candidates-live"` should appear only after a live parser run completed and found no NAV candidates.
