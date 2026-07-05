@@ -5,6 +5,7 @@ import type {
   MonthlyActivityParseResult,
   ParserRejectedCandidate
 } from './codal-monthly-parser';
+import { isUnsafeEquitySuggestion } from './codal-monthly-parser';
 import { manualReviewMarketValueSummary } from './market-value-review';
 
 export type ParserDataStatus = 'live' | 'stale-cache' | 'unavailable-network-error' | 'not-attempted';
@@ -80,6 +81,10 @@ function compactValue(value: ExtractedPortfolioValue): ExtractedPortfolioValue {
     sourceTableCaption: value.sourceTableCaption,
     rowLabel: value.rowLabel,
     columnLabel: value.columnLabel,
+    periodMatchStatus: value.periodMatchStatus,
+    unitDetectionStatus: value.unitDetectionStatus,
+    tableContextStatus: value.tableContextStatus,
+    confidenceReason: value.confidenceReason,
     rankingScore: value.rankingScore,
     reason: value.reason,
     warning: value.warning
@@ -94,15 +99,22 @@ function compactRejectedCandidate(candidate: ParserRejectedCandidate): ParserRej
   };
 }
 
+function safeValues(values: ExtractedPortfolioValue[]): ExtractedPortfolioValue[] {
+  return values.filter((value) => !isUnsafeEquitySuggestion(value));
+}
+
 function candidateAvailabilityFor(
   result: MonthlyActivityParseResult,
   parserDataStatus: ParserDataStatus
 ): CandidateAvailability {
   const review = manualReviewMarketValueSummary(result);
+  const safeExtractedValues = safeValues(result.extractedValues);
+  const safePrimarySuggestions = safeValues(result.primarySuggestions);
+  const safeSecondarySuggestions = safeValues(result.secondarySuggestions);
   const allKinds = [
-    ...result.extractedValues.map((value) => value.kind),
-    ...result.primarySuggestions.map((value) => value.kind),
-    ...result.secondarySuggestions.map((value) => value.kind)
+    ...safeExtractedValues.map((value) => value.kind),
+    ...safePrimarySuggestions.map((value) => value.kind),
+    ...safeSecondarySuggestions.map((value) => value.kind)
   ];
   const hasNavCandidates =
     review.totalCandidates > 0 ||
@@ -246,9 +258,9 @@ export function compactParsedCodalSummary(input: {
     marketReviewCandidateCount: review.totalCandidates,
     marketReviewVisibleCandidateCount: review.visible.length,
     marketReviewHiddenCandidateCount: review.hiddenCandidates,
-    extractedCandidates: input.parseResult.extractedValues.map(compactValue),
-    primarySuggestions: input.parseResult.primarySuggestions.map(compactValue),
-    secondarySuggestions: input.parseResult.secondarySuggestions.map(compactValue),
+    extractedCandidates: safeValues(input.parseResult.extractedValues).map(compactValue),
+    primarySuggestions: safeValues(input.parseResult.primarySuggestions).map(compactValue),
+    secondarySuggestions: safeValues(input.parseResult.secondarySuggestions).map(compactValue),
     rejectedCandidates: marketRejected.map(compactRejectedCandidate),
     userFacingWarnings: input.parseResult.warnings.slice(0, 8),
     sourceReportUrl: input.parseResult.sourceReportUrl,
@@ -266,9 +278,9 @@ export function parseResultFromParsedCache(record: ParsedCodalCacheRecord): Mont
     reportPeriod: record.reportPeriod,
     sourceReportUrl: record.sourceReportUrl ?? record.monthlyReport?.url,
     tableCandidates: [],
-    extractedValues: record.extractedCandidates,
-    primarySuggestions: record.primarySuggestions,
-    secondarySuggestions: record.secondarySuggestions,
+    extractedValues: safeValues(record.extractedCandidates),
+    primarySuggestions: safeValues(record.primarySuggestions),
+    secondarySuggestions: safeValues(record.secondarySuggestions),
     tablePreviews: [],
     diagnostics: {
       symbol: record.symbol,
@@ -282,7 +294,7 @@ export function parseResultFromParsedCache(record: ParsedCodalCacheRecord): Mont
       parserStatus: record.parserStatus,
       parserDataStatus: 'live',
       parserWarnings: record.userFacingWarnings,
-      extractedCandidates: record.extractedCandidates,
+      extractedCandidates: safeValues(record.extractedCandidates),
       rejectedCandidates: record.rejectedCandidates,
       tables: [],
       sourceStrategy: record.marketValueStatus

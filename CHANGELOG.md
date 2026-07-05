@@ -9,12 +9,14 @@
 - Smoke Summary `equitySource` when an equity suggestion is applied.
 - Smoke Summary readiness fields for pending, ready, failed, stale-cache, and no-report parser states.
 - Compact widget progress state for Codal detail fetch and parser completion.
+- Compact `financialEquityExtraction` diagnostics in Smoke Summary.
 
 ### Changed
 
 - Rejects component equity rows and liabilities-plus-equity totals as equity suggestions.
 - Downgrades consolidated, unknown-unit, or period-ambiguous equity candidates for manual review.
 - Marks early Smoke copies as pending instead of silently showing incomplete not-attempted parser output.
+- Exposes financial balance-sheet table, rejected row, rejected column, unit, and selected-candidate diagnostics for equity extraction.
 
 ## 0.1.0-alpha.1
 

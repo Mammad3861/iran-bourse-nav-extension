@@ -368,14 +368,73 @@ describe('smoke summary', () => {
         warning: 'واحد صورت مالی با اطمینان تشخیص داده نشد؛ مقدار خام بدون مقیاس‌گذاری پیشنهاد شده است.'
       }
     ];
+    parsed.diagnostics.tables = [
+      {
+        tableIndex: 7,
+        caption: 'صورت وضعیت مالی',
+        sourceGroup: 'financial',
+        detectedUnit: 'نامشخص',
+        rawHeaders: ['شرح', 'دوره جاری'],
+        normalizedHeaders: ['شرح', 'دوره جاری'],
+        firstRawRows: [],
+        firstNormalizedRows: [],
+        firstRows: [],
+        detectedLabels: [],
+        financialTableContext: 'balance-sheet-strong',
+        financialMatchedLabels: ['صورت وضعیت مالی/ترازنامه', 'حقوق صاحبان سهام/حقوق مالکانه'],
+        equityRowCandidates: [{ rowIndex: 3, rowLabel: 'جمع حقوق مالکانه', matchType: 'exact-total' }],
+        equityColumnCandidates: [
+          {
+            rowIndex: 3,
+            columnIndex: 1,
+            columnLabel: 'دوره جاری / سال مالی منتهی به 1404/12/29',
+            periodMatchStatus: 'exact-current-period',
+            unitDetectionStatus: 'unknown'
+          }
+        ],
+        totalRowCandidates: [],
+        costColumnCandidates: [],
+        marketValueColumnCandidates: [],
+        failureReasons: [],
+        textPreview: ''
+      }
+    ];
+
+    const validFinancialDiscovery = discovery();
+    validFinancialDiscovery.financialStatementReport = {
+      symbol: 'وصندوق',
+      title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹'
+    };
+    if (validFinancialDiscovery.diagnostics?.financialStatement) {
+      validFinancialDiscovery.diagnostics.financialStatement.selectedConfidence = 'high';
+      validFinancialDiscovery.diagnostics.financialStatement.selectedWarnings = [];
+      validFinancialDiscovery.diagnostics.financialStatement.candidates = [
+        {
+          report: validFinancialDiscovery.financialStatementReport,
+          score: 90,
+          selected: true,
+          reasons: [],
+          warnings: [],
+          rejectedReasons: []
+        }
+      ];
+    }
 
     const summary = createSmokeSummary({
       symbol: 'وصندوق',
       currentPriceSource: 'unknown',
+      discovery: validFinancialDiscovery,
       parseResult: parsed
     });
 
     expect(summary).toMatchObject({
+      financialEquityExtraction: {
+        status: 'found',
+        selectedCandidate: expect.objectContaining({
+          kind: 'equitySuggestion',
+          unitDetectionStatus: 'unknown'
+        })
+      },
       extractedCandidates: [
         expect.objectContaining({
           kind: 'equitySuggestion',
@@ -392,6 +451,201 @@ describe('smoke summary', () => {
           confidenceReason: expect.stringContaining('unit=unknown')
         })
       ]
+    });
+  });
+
+  it('summarizes ambiguous financial equity diagnostics without raw tables', () => {
+    const parsed = parseResult();
+    parsed.extractedValues = [];
+    parsed.secondarySuggestions = [];
+    parsed.diagnostics.tables = [
+      {
+        tableIndex: 7,
+        caption: 'صورت وضعیت مالی',
+        sourceGroup: 'financial',
+        detectedUnit: 'نامشخص',
+        rawHeaders: ['شرح', 'دوره جاری'],
+        normalizedHeaders: ['شرح', 'دوره جاری'],
+        firstRawRows: [],
+        firstNormalizedRows: [],
+        firstRows: [],
+        detectedLabels: [],
+        financialTableContext: 'balance-sheet-weak',
+        financialMatchedLabels: ['دارایی‌ها', 'بدهی‌ها'],
+        equityRowCandidates: [
+          { rowIndex: 3, rowLabel: 'سرمایه', matchType: 'rejected-component' },
+          { rowIndex: 4, rowLabel: 'جمع حقوق صاحبان سهام و بدهی‌ها', matchType: 'rejected-liabilities-plus-equity' }
+        ],
+        equityColumnCandidates: [
+          {
+            rowIndex: 4,
+            columnIndex: 1,
+            columnLabel: 'دوره قبل',
+            periodMatchStatus: 'prior-or-restated',
+            unitDetectionStatus: 'unknown'
+          }
+        ],
+        totalRowCandidates: [],
+        costColumnCandidates: [],
+        marketValueColumnCandidates: [],
+        failureReasons: [],
+        textPreview: 'raw financial table should not be copied'
+      }
+    ];
+
+    const validDiscovery = discovery();
+    validDiscovery.financialStatementReport = {
+      symbol: 'وصندوق',
+      title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹'
+    };
+
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      discovery: validDiscovery,
+      parseResult: parsed,
+      detailPipelineStatus: 'completed'
+    });
+
+    expect(summary).toMatchObject({
+      financialEquityExtraction: {
+        status: 'ambiguous',
+        scannedTableCount: 1,
+        candidateTableCount: 1,
+        unitDetectionStatus: 'unknown',
+        rejectedRows: [
+          expect.objectContaining({ rowLabel: 'سرمایه', matchType: 'rejected-component' }),
+          expect.objectContaining({ matchType: 'rejected-liabilities-plus-equity' })
+        ],
+        rejectedColumns: [expect.objectContaining({ periodMatchStatus: 'prior-or-restated' })]
+      }
+    });
+    expect(JSON.stringify(summary)).not.toContain('raw financial table should not be copied');
+  });
+
+  it('does not report found equity extraction for unsafe percentage cached candidates', () => {
+    const parsed = parseResult();
+    parsed.extractedValues = [
+      {
+        kind: 'equitySuggestion',
+        label: 'حقوق صاحبان سهام',
+        value: 21_000_000,
+        rawText: '21',
+        rawValue: 21,
+        unit: 'میلیون ریال',
+        confidence: 'low',
+        sourceTableIndex: 35,
+        sourceColumnIndex: 1,
+        rowLabel: 'حقوق مالکانه قابل انتساب به مالکان شرکت اصلی',
+        columnLabel: 'درصد تغییر'
+      }
+    ];
+    parsed.secondarySuggestions = [];
+
+    const summary = createSmokeSummary({
+      symbol: 'وبانک',
+      currentPriceSource: 'unknown',
+      parseResult: parsed,
+      detailPipelineStatus: 'stale-cache-used'
+    });
+
+    expect(summary).toMatchObject({
+      financialEquityExtraction: {
+        status: 'ambiguous',
+        scannedTableCount: 0,
+        candidateTableCount: 0,
+        rejectedColumns: [
+          expect.objectContaining({
+            columnLabel: 'درصد تغییر',
+            reason: 'ستون درصد/تغییر برای حقوق صاحبان سهام قابل استفاده نیست.'
+          })
+        ]
+      },
+      extractedCandidates: []
+    });
+  });
+
+  it('normalizes failed smoke readiness to failed detail pipeline status', () => {
+    const failedDiscovery = discovery();
+    failedDiscovery.status = 'network-error';
+    failedDiscovery.errorStatus = 'network-error';
+    failedDiscovery.errorMessage = 'Failed to fetch';
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      discovery: failedDiscovery,
+      detailPipelineStatus: 'fetching-detail',
+      parserError: 'Failed to fetch'
+    });
+
+    expect(summary).toMatchObject({
+      smokeReadiness: 'failed',
+      detailPipelineStatus: 'failed',
+      detailStatusText: 'تحلیل گزارش ناموفق بود؛ جزئیات خطا را بررسی کنید.',
+      parserError: 'Failed to fetch'
+    });
+  });
+
+  it('deduplicates repeated stale-cache warnings', () => {
+    const parsed = parseResult();
+    parsed.diagnostics.parserDataStatus = 'stale-cache';
+    parsed.warnings = [
+      'داده کدال زنده دریافت نشد؛ آخرین نتیجه ذخیره‌شده نمایش داده شده است.',
+      'داده کدال زنده دریافت نشد؛ آخرین نتیجه ذخیره‌شده نمایش داده شده است.'
+    ];
+    const summary = createSmokeSummary({
+      symbol: 'وصندوق',
+      currentPriceSource: 'unknown',
+      parseResult: parsed,
+      detailPipelineStatus: 'stale-cache-used'
+    });
+
+    const warnings = summary.userFacingWarnings as string[];
+    expect(warnings.filter((warning) => warning === 'داده کدال زنده دریافت نشد؛ آخرین نتیجه ذخیره‌شده نمایش داده شده است.')).toHaveLength(1);
+  });
+
+  it('marks issuer-mismatch financial equity extraction as skipped', () => {
+    const summary = createSmokeSummary({
+      symbol: 'وغدیر',
+      currentPriceSource: 'unknown',
+      discovery: {
+        status: 'not-found',
+        symbol: 'وغدیر',
+        sourceVerified: false,
+        checkedAt: '2026-07-02T00:00:00.000Z',
+        diagnostics: {
+          requestedSymbol: 'وغدیر',
+          financialStatement: {
+            requestedSymbol: 'وغدیر',
+            reportKind: 'financial-statement',
+            selectedConfidence: 'none',
+            selectedWarnings: [],
+            candidates: [
+              {
+                report: {
+                  symbol: 'وغدیر',
+                  title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹ (شرکت دیگر)'
+                },
+                score: -75,
+                selected: false,
+                reasons: [],
+                warnings: [],
+                rejectedReasons: ['عنوان گزارش داخل پرانتز به شرکت/ناشر دیگری اشاره می‌کند.']
+              }
+            ]
+          }
+        }
+      },
+      detailPipelineStatus: 'completed'
+    });
+
+    expect(summary).toMatchObject({
+      financialReport: {
+        status: 'issuer-mismatch'
+      },
+      financialEquityExtraction: {
+        status: 'skipped-invalid-financial-report'
+      }
     });
   });
 

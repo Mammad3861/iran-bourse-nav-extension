@@ -1,6 +1,11 @@
 import type { NavInputs } from '../core/nav-calculator';
 import type { CodalReportDiscoveryResult, CodalReportSelectionCandidate, CodalReportSelectionDiagnostics } from './codal-client';
-import type { ExtractedPortfolioValue, MonthlyActivityParseResult } from './codal-monthly-parser';
+import {
+  isUnsafeEquitySuggestion,
+  unsafeEquityColumnReason,
+  type ExtractedPortfolioValue,
+  type MonthlyActivityParseResult
+} from './codal-monthly-parser';
 import {
   candidateAvailabilityForSmoke,
   parsedCacheWarnings,
@@ -164,9 +169,129 @@ function financialReportSummary(
   };
 }
 
+function financialEquityExtractionSummary(
+  input: SmokeSummaryInput,
+  financialReport: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const selected = input.parseResult?.extractedValues.find((value) => value.kind === 'equitySuggestion' && !isUnsafeEquitySuggestion(value));
+  const unsafeSelected = input.parseResult?.extractedValues.find(isUnsafeEquitySuggestion);
+  if (selected && !input.discovery?.financialStatementReport && !input.parseResult?.diagnostics.tables.some((table) => table.sourceGroup?.startsWith('financial'))) {
+    return {
+      status: 'ambiguous',
+      reason: 'کاندید حقوق صاحبان سهام در کش ذخیره‌شده وجود دارد، اما تشخیص جدول مالی برای تأیید آن در Smoke موجود نیست.',
+      reportTitle: input.parseResult?.diagnostics.reportTitle,
+      reportPeriod: input.parseResult?.reportPeriod ?? input.parseResult?.diagnostics.reportDate,
+      scannedTableCount: 0,
+      candidateTableCount: 0,
+      balanceSheetTableCandidates: [],
+      rejectedRows: [],
+      rejectedColumns: [],
+      unitDetectionStatus: selected.unitDetectionStatus ?? 'unknown'
+    };
+  }
+  const reportStatus = financialReport?.status;
+  if (reportStatus && reportStatus !== 'valid-issuer-financial-report' && !unsafeSelected) {
+    return {
+      status: 'skipped-invalid-financial-report',
+      reason: 'صورت مالی معتبر ناشر اصلی برای استخراج حقوق صاحبان سهام وجود ندارد.',
+      reportTitle: input.discovery?.financialStatementReport?.title,
+      scannedTableCount: 0,
+      candidateTableCount: 0,
+      balanceSheetTableCandidates: [],
+      rejectedRows: [],
+      rejectedColumns: [],
+      unitDetectionStatus: 'unknown'
+    };
+  }
+  if (!selected && !unsafeSelected && !input.discovery?.financialStatementReport && !input.parseResult?.diagnostics.tables.some((table) => table.sourceGroup?.startsWith('financial'))) {
+    return undefined;
+  }
+
+  const financialTables = input.parseResult?.diagnostics.tables.filter((table) => table.sourceGroup?.startsWith('financial')) ?? [];
+  const rejectedRows = financialTables
+    .flatMap((table) =>
+      (table.equityRowCandidates ?? [])
+        .filter((row) => row.matchType.startsWith('rejected'))
+        .map((row) => ({
+          tableIndex: table.tableIndex,
+          rowIndex: row.rowIndex,
+          rowLabel: row.rowLabel,
+          matchType: row.matchType
+        }))
+    )
+    .slice(0, 12);
+  const rejectedColumns = financialTables
+    .flatMap((table) =>
+      (table.equityColumnCandidates ?? [])
+        .filter((column) => column.rejectionReason || column.periodMatchStatus !== 'exact-current-period' || column.unitDetectionStatus === 'unknown')
+        .map((column) => ({
+          tableIndex: table.tableIndex,
+          columnIndex: column.columnIndex,
+          columnLabel: column.columnLabel,
+          periodMatchStatus: column.periodMatchStatus,
+          unitDetectionStatus: column.unitDetectionStatus,
+          reason: column.rejectionReason
+        }))
+    )
+    .concat(
+      unsafeSelected
+        ? [
+            {
+              tableIndex: unsafeSelected.sourceTableIndex,
+              columnIndex: unsafeSelected.sourceColumnIndex ?? -1,
+              columnLabel: unsafeSelected.columnLabel,
+              periodMatchStatus: unsafeSelected.periodMatchStatus ?? 'unknown',
+              unitDetectionStatus: unsafeSelected.unitDetectionStatus ?? 'unknown',
+              reason: unsafeEquityColumnReason(unsafeSelected.columnLabel)
+            }
+          ]
+        : []
+    )
+    .slice(0, 12);
+  const balanceSheetTableCandidates = financialTables
+    .filter((table) => table.financialTableContext === 'balance-sheet-strong' || (table.equityRowCandidates?.length ?? 0) > 0)
+    .slice(0, 8)
+    .map((table) => ({
+      tableIndex: table.tableIndex,
+      caption: table.caption,
+      sourceGroup: table.sourceGroup,
+      financialTableContext: table.financialTableContext,
+      matchedLabels: table.financialMatchedLabels ?? [],
+      equityRowCandidateCount: table.equityRowCandidates?.length ?? 0
+    }));
+  const candidateTableCount = balanceSheetTableCandidates.length;
+  const anyUnitDetected =
+    selected?.unitDetectionStatus === 'detected' ||
+    financialTables.some((table) => table.equityColumnCandidates?.some((column) => column.unitDetectionStatus === 'detected'));
+  const canBeFound = Boolean(selected && financialTables.length > 0 && candidateTableCount > 0);
+  const status = canBeFound ? 'found' : rejectedRows.length > 0 || rejectedColumns.length > 0 || candidateTableCount > 0 || unsafeSelected ? 'ambiguous' : 'not-found';
+  const reason = selected
+    ? canBeFound
+      ? 'حقوق صاحبان سهام با قواعد محافظه‌کارانه به‌عنوان پیشنهاد استخراج شد.'
+      : 'کاندید حقوق صاحبان سهام بدون تشخیص جدول مالی کافی قابل اتکا نیست.'
+    : rejectedRows.length > 0 || rejectedColumns.length > 0 || candidateTableCount > 0
+      ? 'چند ردیف یا ستون مرتبط دیده شد، اما ابهام ردیف/ستون/واحد مانع پیشنهاد قابل اتکا شد.'
+      : 'صورت مالی معتبر پیدا شد، اما ردیف جمع حقوق صاحبان سهام/حقوق مالکانه با اطمینان کافی استخراج نشد.';
+
+  return {
+    status,
+    reason,
+    reportTitle: input.discovery?.financialStatementReport?.title ?? input.parseResult?.diagnostics.reportTitle,
+    reportPeriod: input.parseResult?.reportPeriod ?? input.parseResult?.diagnostics.reportDate,
+    scannedTableCount: financialTables.length,
+    candidateTableCount,
+    balanceSheetTableCandidates,
+    rejectedRows,
+    rejectedColumns,
+    unitDetectionStatus: anyUnitDetected ? 'detected' : 'unknown',
+    selectedCandidate: canBeFound && selected ? compactCandidate(selected) : undefined
+  };
+}
+
 function smokeReadinessFor(input: SmokeSummaryInput, parserDataStatus: string): SmokeReadiness {
-  if (input.detailPipelineStatus === 'failed' || parserDataStatus === 'unavailable-network-error') return 'failed';
   if (input.detailPipelineStatus === 'stale-cache-used' || parserDataStatus === 'stale-cache') return 'stale-cache';
+  if (input.discovery?.status === 'network-error' || input.discovery?.errorStatus === 'network-error') return 'failed';
+  if (input.detailPipelineStatus === 'failed' || parserDataStatus === 'unavailable-network-error') return 'failed';
   if (input.parseResult || input.detailPipelineStatus === 'completed') return 'ready';
   if (input.detailPipelineStatus === 'fetching-detail' || input.detailPipelineStatus === 'parsing') return 'pending';
   if (input.discovery?.monthlyActivityReport || input.discovery?.financialStatementReport) return 'pending';
@@ -191,9 +316,16 @@ function smokeReadinessWarning(readiness: SmokeReadiness): string | undefined {
 
 export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unknown> {
   const monthly = input.discovery?.diagnostics?.monthlyActivity;
+  const financialReport = financialReportSummary(input.discovery);
   const parserDataStatus = parserDataStatusFor({ discovery: input.discovery, parseResult: input.parseResult });
   const smokeReadiness = smokeReadinessFor(input, parserDataStatus);
   const readinessWarning = smokeReadinessWarning(smokeReadiness);
+  const detailPipelineStatus: DetailPipelineStatus =
+    smokeReadiness === 'failed'
+      ? 'failed'
+      : smokeReadiness === 'stale-cache'
+        ? 'stale-cache-used'
+        : input.detailPipelineStatus ?? (input.parseResult ? 'completed' : 'not-started');
   const candidateAvailability = candidateAvailabilityForSmoke({
     discovery: input.discovery,
     parseResult: input.parseResult
@@ -206,6 +338,16 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
   const marketReviewVisibleCandidateCount = marketReview?.visible.length ?? 0;
   const marketReviewHiddenCandidateCount = marketReview?.hiddenCandidates ?? 0;
   const marketReviewTotalCandidateCount = (marketReview?.totalCandidates ?? 0) + marketReviewRejectedCandidateCount;
+  const userFacingWarnings = [
+    ...(readinessWarning ? [readinessWarning] : []),
+    ...(parserDataStatus === 'stale-cache' ? [parsedCacheWarnings.stale] : []),
+    ...(parserDataStatus === 'unavailable-network-error' ? [parsedCacheWarnings.unavailableNetwork] : []),
+    ...(input.parseResult?.warnings.slice(0, 8) ?? []),
+    ...((input.support?.status === 'unsupported' || input.support?.status === 'unknown') &&
+    !input.discovery?.financialStatementReport
+      ? ['گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد.']
+      : [])
+  ].filter((warning, index, all) => all.indexOf(warning) === index);
 
   return {
     symbol: input.symbol,
@@ -222,8 +364,11 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     codalDiscoveryStatus: input.discovery?.status,
     smokeReadiness,
     smokeReadinessWarning: readinessWarning,
-    detailPipelineStatus: input.detailPipelineStatus ?? (input.parseResult ? 'completed' : 'not-started'),
-    detailStatusText: input.detailStatusText,
+    detailPipelineStatus,
+    detailStatusText:
+      smokeReadiness === 'failed'
+        ? input.detailStatusText ?? 'تحلیل گزارش ناموفق بود؛ جزئیات خطا را بررسی کنید.'
+        : input.detailStatusText,
     parserStartedAt: input.parserStartedAt,
     parserCompletedAt: input.parserCompletedAt,
     parserError: input.parserError,
@@ -241,7 +386,8 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
           warnings: monthly?.selectedWarnings ?? []
         }
       : undefined,
-    financialReport: financialReportSummary(input.discovery),
+    financialReport,
+    financialEquityExtraction: financialEquityExtractionSummary(input, financialReport),
     parserStatus: input.parseResult?.status,
     marketValueStatus: input.parseResult?.diagnostics.sourceStrategy?.marketValueStatus,
     marketReviewCandidateCount: marketReviewVisibleCandidateCount,
@@ -249,20 +395,11 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     marketReviewHiddenCandidateCount,
     marketReviewRejectedCandidateCount,
     marketReviewTotalCandidateCount,
-    extractedCandidates: input.parseResult?.extractedValues.map(compactCandidate) ?? [],
+    extractedCandidates: input.parseResult?.extractedValues.filter((value) => !isUnsafeEquitySuggestion(value)).map(compactCandidate) ?? [],
     navCompletionStatus: input.navCompletion?.status,
     missingFields: input.navCompletion?.navTotalMissingFields ?? [],
     navShareMissingFields: input.navCompletion?.navShareMissingFields ?? [],
-    userFacingWarnings: [
-      ...(readinessWarning ? [readinessWarning] : []),
-      ...(parserDataStatus === 'stale-cache' ? [parsedCacheWarnings.stale] : []),
-      ...(parserDataStatus === 'unavailable-network-error' ? [parsedCacheWarnings.unavailableNetwork] : []),
-      ...(input.parseResult?.warnings.slice(0, 8) ?? []),
-      ...((input.support?.status === 'unsupported' || input.support?.status === 'unknown') &&
-      !input.discovery?.financialStatementReport
-        ? ['گزارش مالی معتبر ناشر اصلی برای NAV پیدا نشد.']
-        : [])
-    ]
+    userFacingWarnings
   };
 }
 

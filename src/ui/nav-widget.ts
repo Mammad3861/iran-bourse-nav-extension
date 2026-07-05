@@ -1109,7 +1109,15 @@ function renderMonthlySuggestions(
     : result.reportTitle ?? '-';
   warnings.textContent = result.warnings.length ? result.warnings.join(' ') : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.';
 
-  const compactWarnings = compactParserWarnings(result.warnings);
+  const financialTables = result.diagnostics.tables.filter((table) => table.sourceGroup?.startsWith('financial'));
+  const hasEquitySuggestion = result.extractedValues.some((value) => value.kind === 'equitySuggestion');
+  const equityMissingWarning =
+    financialTables.length > 0 && !hasEquitySuggestion
+      ? financialTables.some((table) => (table.equityRowCandidates?.length ?? 0) > 0)
+        ? 'چند ردیف مرتبط با حقوق مالکانه دیده شد اما به‌دلیل ابهام ردیف/ستون/واحد پیشنهاد قابل اعمال ساخته نشد.'
+        : 'صورت مالی معتبر پیدا شد، اما ردیف جمع حقوق صاحبان سهام/حقوق مالکانه با اطمینان کافی استخراج نشد؛ جزئیات تشخیص را بررسی کنید یا مقدار را دستی وارد کنید.'
+      : undefined;
+  const compactWarnings = compactParserWarnings([...result.warnings, ...(equityMissingWarning ? [equityMissingWarning] : [])]);
   warnings.textContent = compactWarnings.length
     ? compactWarnings.join(' ')
     : 'پیش از اعمال، اعداد را با گزارش رسمی تطبیق دهید.';

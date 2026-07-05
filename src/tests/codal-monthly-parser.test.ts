@@ -1183,6 +1183,131 @@ describe('parseMonthlyActivityReport', () => {
     expect(result.extractedValues).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
     );
+    expect(result.diagnostics.tables[0].equityRowCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rowLabel: 'سرمایه',
+          matchType: 'rejected-component'
+        }),
+        expect.objectContaining({
+          rowLabel: 'جمع حقوق صاحبان سهام و بدهی ها',
+          matchType: 'rejected-liabilities-plus-equity'
+        })
+      ])
+    );
+  });
+
+  it('records financial table equity matching diagnostics when no exact equity row is found', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'ارقام به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی',
+            headers: ['شرح', 'سال مالی منتهی به ۱۴۰۴/۱۲/۲۹'],
+            rows: [
+              ['شرح', 'سال مالی منتهی به ۱۴۰۴/۱۲/۲۹'],
+              ['دارایی‌ها', '۹۰۰۰'],
+              ['بدهی‌ها', '۴۰۰۰'],
+              ['سرمایه', '۱۰۰۰'],
+              ['سود انباشته', '۲۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
+    );
+    expect(result.diagnostics.tables[0]).toEqual(
+      expect.objectContaining({
+        financialTableContext: 'balance-sheet-strong',
+        financialMatchedLabels: expect.arrayContaining(['دارایی‌ها', 'بدهی‌ها']),
+        equityRowCandidates: expect.arrayContaining([
+          expect.objectContaining({ rowLabel: 'سرمایه', matchType: 'rejected-component' }),
+          expect.objectContaining({ rowLabel: 'سود انباشته', matchType: 'rejected-component' })
+        ])
+      })
+    );
+  });
+
+  it('matches normalized Arabic/Persian total equity labels and reports unit/period diagnostics', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'تمامی ارقام به میلیون ریال',
+        extractedTables: [
+          {
+            index: 0,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی',
+            headers: ['شرح', 'سال مالی منتهی به ۱۴۰۴/۱۲/۲۹'],
+            rows: [
+              ['شرح', 'سال مالی منتهی به ۱۴۰۴/۱۲/۲۹'],
+              ['دارایی ها', '۵۰۰۰'],
+              ['بدهی ها', '۲۰۰۰'],
+              ['جمع حقوق صاحبان سهام شركت', '۳۰۰۰']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وصندوق',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وصندوق', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'equitySuggestion',
+          value: 3_000_000_000,
+          unitDetectionStatus: 'detected',
+          periodMatchStatus: 'exact-current-period'
+        })
+      ])
+    );
+    expect(result.diagnostics.tables[0].equityColumnCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          columnLabel: 'سال مالی منتهی به 1404/12/29',
+          periodMatchStatus: 'exact-current-period',
+          unitDetectionStatus: 'detected'
+        })
+      ])
+    );
   });
 
   it('prefers the current-period equity column over prior-period values', () => {
@@ -1339,6 +1464,108 @@ describe('parseMonthlyActivityReport', () => {
           confidence: 'low',
           periodMatchStatus: 'prior-or-restated',
           warning: expect.stringContaining('تجدید ارائه')
+        })
+      ])
+    );
+  });
+
+  it('rejects percentage/change equity columns instead of creating unsafe equity suggestions', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 35,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی',
+            headers: ['شرح', 'درصد تغییر'],
+            rows: [
+              ['شرح', 'درصد تغییر'],
+              ['دارایی‌ها', '۵'],
+              ['بدهی‌ها', '۳'],
+              ['حقوق مالکانه قابل انتساب به مالکان شرکت اصلی', '۲۱']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وبانک',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وبانک', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
+    );
+    expect(result.diagnostics.tables[0].equityColumnCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          columnLabel: 'درصد تغییر',
+          rejectionReason: 'ستون درصد/تغییر برای حقوق صاحبان سهام قابل استفاده نیست.'
+        })
+      ])
+    );
+  });
+
+  it('rejects English percent/change equity columns', () => {
+    const result = parseFinancialStatementReport(
+      detail({
+        title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹',
+        plainTextPreview: 'مبالغ به میلیون ریال',
+        extractedTables: [
+          {
+            index: 36,
+            source: 'html-table',
+            caption: 'صورت وضعیت مالی',
+            headers: ['شرح', 'percent change'],
+            rows: [
+              ['شرح', 'percent change'],
+              ['دارایی‌ها', '۵'],
+              ['بدهی‌ها', '۳'],
+              ['جمع حقوق مالکانه', '۲۱']
+            ]
+          }
+        ],
+        selectionDiagnostics: {
+          requestedSymbol: 'وبانک',
+          reportKind: 'financial-statement',
+          selectedConfidence: 'high',
+          selectedWarnings: [],
+          candidates: [
+            {
+              report: { symbol: 'وبانک', title: 'اطلاعات و صورت‌های مالی سال مالی منتهی به ۱۴۰۴/۱۲/۲۹' },
+              score: 90,
+              selected: true,
+              reasons: [],
+              warnings: [],
+              rejectedReasons: []
+            }
+          ]
+        }
+      })
+    );
+
+    expect(result.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
+    );
+    expect(result.diagnostics.tables[0].equityColumnCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          columnLabel: 'percent change',
+          rejectionReason: 'ستون درصد/تغییر برای حقوق صاحبان سهام قابل استفاده نیست.'
         })
       ])
     );

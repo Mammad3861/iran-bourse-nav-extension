@@ -277,4 +277,51 @@ describe('Codal parsed summary cache', () => {
 
     expect(candidateAvailabilityForSmoke({ parseResult: emptyLive })).toBe('no-nav-candidates-live');
   });
+
+  it('filters unsafe cached equity suggestions from percentage/change columns', () => {
+    const restored = parseResultFromParsedCache({
+      symbol: 'وبانک',
+      parserStatus: 'parsed',
+      marketReviewCandidateCount: 0,
+      marketReviewVisibleCandidateCount: 0,
+      marketReviewHiddenCandidateCount: 0,
+      extractedCandidates: [
+        {
+          kind: 'equitySuggestion',
+          label: 'حقوق صاحبان سهام',
+          value: 21_000_000,
+          rawValue: 21,
+          rawText: '21',
+          unit: 'میلیون ریال',
+          confidence: 'low',
+          sourceTableIndex: 35,
+          sourceColumnIndex: 1,
+          rowLabel: 'حقوق مالکانه قابل انتساب به مالکان شرکت اصلی',
+          columnLabel: 'درصد تغییر'
+        },
+        {
+          kind: 'totalSharesSuggestion',
+          label: 'تعداد کل سهام',
+          value: 9_000_000_000,
+          rawText: '9000000000',
+          confidence: 'medium',
+          sourceTableIndex: -1
+        }
+      ],
+      primarySuggestions: [],
+      secondarySuggestions: [],
+      rejectedCandidates: [],
+      userFacingWarnings: [],
+      parsedAt: '2026-07-03T00:00:00.000Z',
+      cachedAt: '2026-07-03T00:00:00.000Z'
+    });
+
+    expect(restored.extractedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'equitySuggestion' })])
+    );
+    expect(restored.extractedValues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'totalSharesSuggestion' })])
+    );
+    expect(restored.diagnostics.candidateAvailability).toBe('live-basic-candidates-only');
+  });
 });

@@ -47,6 +47,7 @@ The copied JSON should include compact public/debug fields only:
 - total shares and source
 - monthly/financial report confidence and selected warnings
 - financial report issuer-match status and rejection reason when a candidate is rejected or downgraded
+- financial equity extraction diagnostics under `financialEquityExtraction`
 - parser status, market-value status, manual-review candidate count
 - extracted suggestion candidates
 - NAV completion status and missing fields
@@ -82,6 +83,14 @@ Market-value review counts are split:
 The legacy `marketReviewCandidateCount` means visible/reviewable candidates only.
 
 The compact summary should not include raw Codal tables, full table previews, or large rejected-candidate payloads. Use `کپی تشخیص Parser` or report-selection diagnostics for deep table/report debugging.
+
+`financialEquityExtraction` is a compact diagnostic for issuer-level equity extraction:
+
+- `status: "found"` means an `equitySuggestion` exists. Testers must still verify row label, period, and unit before applying.
+- `status: "not-found"` means a valid financial report was present but no confident total-equity row/column was found.
+- `status: "ambiguous"` means related rows or columns were seen but rejected or downgraded because row, column, period, or unit evidence was not strong enough.
+- `status: "skipped-invalid-financial-report"` means the financial report was issuer-mismatch, missing, invalid, clarification-only, or otherwise unsafe for issuer-level NAV.
+- Absence of `equitySuggestion` can be correct. Do not manually apply equity from Codal unless row, period, unit, and issuer context are verified.
 
 ## Safety Invariants
 

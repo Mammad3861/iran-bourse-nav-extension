@@ -91,6 +91,28 @@ export interface ParserTotalRowCandidate {
   exact: boolean;
 }
 
+export type EquityRowMatchType =
+  | 'exact-total'
+  | 'parent-attributable'
+  | 'generic-total'
+  | 'rejected-component'
+  | 'rejected-liabilities-plus-equity';
+
+export interface ParserEquityRowCandidate {
+  rowIndex: number;
+  rowLabel: string;
+  matchType: EquityRowMatchType;
+}
+
+export interface ParserEquityColumnCandidate {
+  rowIndex: number;
+  columnIndex: number;
+  columnLabel?: string;
+  periodMatchStatus: PeriodMatchStatus;
+  unitDetectionStatus: UnitDetectionStatus;
+  rejectionReason?: string;
+}
+
 export interface ParserTableDiagnostics {
   tableIndex: number;
   caption?: string;
@@ -104,6 +126,10 @@ export interface ParserTableDiagnostics {
   firstNormalizedRows: string[][];
   firstRows: string[][];
   detectedLabels: string[];
+  financialTableContext?: TableContextStatus;
+  financialMatchedLabels?: string[];
+  equityRowCandidates?: ParserEquityRowCandidate[];
+  equityColumnCandidates?: ParserEquityColumnCandidate[];
   totalRowCandidates: ParserTotalRowCandidate[];
   costColumnCandidates: ParserColumnCandidate[];
   marketValueColumnCandidates: ParserColumnCandidate[];
@@ -782,6 +808,23 @@ function rankColumnContext(context: ColumnContext): number {
   return 0;
 }
 
+export function unsafeEquityColumnReason(columnLabel: string | undefined): string | undefined {
+  const label = normalizeText(columnLabel ?? '').toLowerCase();
+  if (!label) return undefined;
+  if (
+    /درصد|تغییر|تغییرات|افزایش|کاهش|رشد|نسبت|سهم|تعداد|شرح|توضیحات|یادداشت|note|percent|percentage|change|ratio/i.test(
+      label
+    )
+  ) {
+    return 'ستون درصد/تغییر برای حقوق صاحبان سهام قابل استفاده نیست.';
+  }
+  return undefined;
+}
+
+export function isUnsafeEquitySuggestion(value: ExtractedPortfolioValue): boolean {
+  return value.kind === 'equitySuggestion' && Boolean(unsafeEquityColumnReason(value.columnLabel));
+}
+
 function confidenceForValue(options: {
   tableConfidence: ParseConfidence;
   exactTotalRow: boolean;
@@ -1233,11 +1276,73 @@ function tableFailureReasons(table: ParsedTable): string[] {
   return [...reasons];
 }
 
-function tableDiagnostics(table: ParsedTable, parserGroup: 'monthly' | 'financial' = 'monthly'): ParserTableDiagnostics {
+function financialMatchedLabelsForTable(table: ParsedTable): string[] {
   const text = tableText(table);
-  const unitInfo = unitInfoForTable(table);
+  const labels: string[] = [];
+  if (hasAny(text, financialPositionTableSignals)) labels.push('صورت وضعیت مالی/ترازنامه');
+  if (hasAny(text, financialPositionAssetSignals)) labels.push('دارایی‌ها');
+  if (hasAny(text, financialPositionLiabilitySignals)) labels.push('بدهی‌ها');
+  if (hasAny(text, financialPositionEquitySignals)) labels.push('حقوق صاحبان سهام/حقوق مالکانه');
+  return labels;
+}
+
+function equityRowCandidatesForDiagnostics(table: ParsedTable): ParserEquityRowCandidate[] {
+  return table.rows
+    .map((row, rowIndex) => ({ row, rowIndex, rowLabel: rowLabel(row), matchType: equityRowMatchDetail(row) }))
+    .filter(({ row, rowLabel, matchType }) => {
+      if (matchType) return true;
+      return row.some((cell) => hasAny(normalizeText(cell), labelPatterns.equitySuggestion)) || /سرمایه|اندوخته|انباشته|بدهی/.test(rowLabel);
+    })
+    .slice(0, 20)
+    .map(({ rowIndex, rowLabel, matchType }) => ({
+      rowIndex,
+      rowLabel,
+      matchType: matchType ?? 'rejected-component'
+    }));
+}
+
+function equityColumnCandidatesForDiagnostics(
+  table: ParsedTable,
+  reportPeriod?: string,
+  unitInfo: UnitInfo = unitInfoForTable(table)
+): ParserEquityColumnCandidate[] {
+  const unitDetectionStatus: UnitDetectionStatus = unitInfo.clear ? 'detected' : 'unknown';
+  return table.rows
+    .map((row, rowIndex) => ({ row, rowIndex, matchType: equityRowMatchDetail(row) }))
+    .filter(({ matchType }) => matchType === 'exact-total' || matchType === 'parent-attributable' || matchType === 'generic-total')
+    .flatMap(({ row, rowIndex }) =>
+      row
+        .map((cell, columnIndex) => ({
+          rowIndex,
+          columnIndex,
+          rawValue: parseCandidateNumber(cell),
+          context: columnContextFor(table.rows, columnIndex, reportPeriod, rowIndex)
+        }))
+        .filter((candidate) => candidate.rawValue !== undefined && Math.abs(candidate.rawValue) > 0)
+        .map((candidate) => ({
+          rowIndex: candidate.rowIndex,
+          columnIndex: candidate.columnIndex,
+          columnLabel: candidate.context.headerPath ?? candidate.context.measureLabel,
+          periodMatchStatus: candidate.context.periodMatchStatus,
+          unitDetectionStatus,
+          rejectionReason: unsafeEquityColumnReason(candidate.context.headerPath ?? candidate.context.measureLabel)
+        }))
+    )
+    .slice(0, 20);
+}
+
+function tableDiagnostics(
+  table: ParsedTable,
+  parserGroup: 'monthly' | 'financial' = 'monthly',
+  reportPeriod?: string,
+  detail?: CodalReportDetail
+): ParserTableDiagnostics {
+  const text = tableText(table);
+  const unitInfo = parserGroup === 'financial' && detail ? unitInfoForFinancialTable(detail, table) : unitInfoForTable(table);
   const rawHeaders = table.rawRows[0] ?? [];
   const normalizedHeaders = table.rows[0] ?? [];
+  const financialTableContext: TableContextStatus | undefined =
+    parserGroup === 'financial' ? (isFinancialPositionTable(table) ? 'balance-sheet-strong' : 'balance-sheet-weak') : undefined;
 
   return {
     tableIndex: table.index,
@@ -1252,6 +1357,11 @@ function tableDiagnostics(table: ParsedTable, parserGroup: 'monthly' | 'financia
     firstNormalizedRows: table.rows.slice(0, 10).map((row) => row.slice(0, 12)),
     firstRows: table.rows.slice(0, 10).map((row) => row.slice(0, 12)),
     detectedLabels: matchedLabels(text),
+    financialTableContext,
+    financialMatchedLabels: parserGroup === 'financial' ? financialMatchedLabelsForTable(table) : undefined,
+    equityRowCandidates: parserGroup === 'financial' ? equityRowCandidatesForDiagnostics(table) : undefined,
+    equityColumnCandidates:
+      parserGroup === 'financial' ? equityColumnCandidatesForDiagnostics(table, reportPeriod, unitInfo) : undefined,
     totalRowCandidates: totalRowCandidatesForDiagnostics(table.rows).map((candidate) => ({
       ...candidate,
       cells: candidate.cells.slice(0, 12)
@@ -1296,6 +1406,7 @@ function buildDiagnostics(options: {
   extraRejectedCandidates?: ParserRejectedCandidate[];
   parserGroup?: 'monthly' | 'financial';
 }): MonthlyActivityParserDiagnostics {
+  const reportPeriod = extractReportPeriod(options.detail);
   return {
     symbol: options.detail.symbol,
     codalSymbol: options.detail.symbol,
@@ -1315,7 +1426,7 @@ function buildDiagnostics(options: {
       ...rejectedCandidatesForDiagnostics(options.tables, options.extractedValues, options.warnings),
       ...(options.extraRejectedCandidates ?? [])
     ],
-    tables: options.tables.map((table) => tableDiagnostics(table, options.parserGroup ?? 'monthly'))
+    tables: options.tables.map((table) => tableDiagnostics(table, options.parserGroup ?? 'monthly', reportPeriod, options.detail))
   };
 }
 
@@ -1360,23 +1471,28 @@ function normalizeEquityLabel(value: string | undefined): string {
     .replace(/[ي]/g, 'ی')
     .replace(/[ك]/g, 'ک')
     .replace(/\u200c/g, ' ')
+    .replace(/[،,:؛؛.()（）[\]{}]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-type EquityRowMatch = 'exact-total' | 'parent-attributable' | 'generic-total' | undefined;
+type EquityRowMatch = Extract<EquityRowMatchType, 'exact-total' | 'parent-attributable' | 'generic-total'> | undefined;
 
-function equityRowMatch(row: string[]): EquityRowMatch {
+function equityRowMatchDetail(row: string[]): EquityRowMatchType | undefined {
   const label = normalizeEquityLabel(rowLabel(row));
-  const compact = label.replace(/\s+/g, '');
+  const compact = label.replace(/[^\p{L}\p{N}]+/gu, '');
 
-  const rejectSignals = [
+  const liabilitiesPlusEquitySignals = [
     /حقوق\s*صاحبان\s*سهام\s*و\s*بدهی\s*ها/,
     /حقوق\s*صاحبان\s*سهام\s*و\s*بدهی‌ها/,
     /بدهی\s*ها\s*و\s*حقوق\s*صاحبان\s*سهام/,
     /بدهی‌ها\s*و\s*حقوق\s*صاحبان\s*سهام/,
     /حقوق\s*مالکانه\s*و\s*بدهی\s*ها/,
-    /حقوق\s*مالکانه\s*و\s*بدهی‌ها/,
+    /حقوق\s*مالکانه\s*و\s*بدهی‌ها/
+  ];
+  if (liabilitiesPlusEquitySignals.some((pattern) => pattern.test(label))) return 'rejected-liabilities-plus-equity';
+
+  const componentRejectSignals = [
     /جمع\s*دارایی\s*ها/,
     /جمع\s*دارایی‌ها/,
     /جمع\s*بدهی\s*ها/,
@@ -1394,13 +1510,14 @@ function equityRowMatch(row: string[]): EquityRowMatch {
     /مازاد\s*تجدید\s*ارزیابی/,
     /^سرمایه$/
   ];
-  if (rejectSignals.some((pattern) => pattern.test(label))) return undefined;
+  if (componentRejectSignals.some((pattern) => pattern.test(label))) return 'rejected-component';
 
   if (
     compact === 'جمعحقوقمالکانه' ||
     compact === 'جمعحقوقمالکانهشرکت' ||
     compact === 'جمعحقوقصاحبانسهام' ||
     compact === 'جمعحقوقصاحبانسهامشرکت' ||
+    compact === 'جمعحقوقصاحبانسهامشرکتاصلی' ||
     compact === 'جمعحقوقصاحبانسهامشرکتاصلی' ||
     compact === 'جمعحقوقصاحبانسهاماصلی'
   ) {
@@ -1409,8 +1526,10 @@ function equityRowMatch(row: string[]): EquityRowMatch {
 
   if (
     compact === 'حقوقمالکانهقابلانتساببهمالکانشرکتاصلی' ||
+    compact === 'حقوقصاحبانسهامقابلانتساببهمالکانشرکتاصلی' ||
     compact === 'جمعحقوققابلانتساببهمالکانشرکتاصلی' ||
-    compact === 'جمعحقوقمالکانهقابلانتساببهمالکانشرکتاصلی'
+    compact === 'جمعحقوقمالکانهقابلانتساببهمالکانشرکتاصلی' ||
+    compact === 'جمعحقوقصاحبانسهامقابلانتساببهمالکانشرکتاصلی'
   ) {
     return 'parent-attributable';
   }
@@ -1420,6 +1539,11 @@ function equityRowMatch(row: string[]): EquityRowMatch {
   }
 
   return undefined;
+}
+
+function equityRowMatch(row: string[]): EquityRowMatch {
+  const match = equityRowMatchDetail(row);
+  return match === 'exact-total' || match === 'parent-attributable' || match === 'generic-total' ? match : undefined;
 }
 
 function isFinancialPositionTable(table: ParsedTable): boolean {
@@ -1436,7 +1560,8 @@ function bestNumericCellInRow(
   table: ParsedTable,
   row: string[],
   reportPeriod?: string,
-  rowIndex?: number
+  rowIndex?: number,
+  allowColumn?: (context: ColumnContext) => boolean
 ): { columnIndex: number; rawText: string; rawValue: number; context: ColumnContext } | undefined {
   const numericCells = row
     .map((cell, columnIndex) => ({
@@ -1447,6 +1572,7 @@ function bestNumericCellInRow(
     }))
     .filter((candidate): candidate is { columnIndex: number; rawText: string; rawValue: number; context: ColumnContext } => {
       if (candidate.rawValue === undefined) return false;
+      if (allowColumn && !allowColumn(candidate.context)) return false;
       return Math.abs(candidate.rawValue) > 0;
     });
 
@@ -1483,8 +1609,17 @@ function extractStandaloneFinancialValue(options: {
       }
     }
 
-    const numeric = bestNumericCellInRow(options.table, row, options.reportPeriod, rowIndex);
+    const numeric = bestNumericCellInRow(
+      options.table,
+      row,
+      options.reportPeriod,
+      rowIndex,
+      options.kind === 'equitySuggestion'
+        ? (context) => !unsafeEquityColumnReason(context.headerPath ?? context.measureLabel)
+        : undefined
+    );
     if (!numeric) continue;
+    const columnLabel = numeric.context.headerPath ?? numeric.context.measureLabel;
 
     const multiplier = options.kind === 'totalSharesSuggestion' ? 1 : options.unitInfo.multiplier;
     const unitDetectionStatus: UnitDetectionStatus = options.unitInfo.clear ? 'detected' : 'unknown';
@@ -1548,7 +1683,7 @@ function extractStandaloneFinancialValue(options: {
       sourceColumnIndex: numeric.columnIndex,
       sourceTableCaption: options.table.caption,
       rowLabel: rowLabel(row),
-      columnLabel: numeric.context.headerPath ?? numeric.context.measureLabel,
+      columnLabel,
       periodMatchStatus: options.kind === 'equitySuggestion' ? periodMatchStatus : undefined,
       unitDetectionStatus: options.kind === 'equitySuggestion' ? unitDetectionStatus : undefined,
       tableContextStatus: options.kind === 'equitySuggestion' ? tableContextStatus : undefined,
