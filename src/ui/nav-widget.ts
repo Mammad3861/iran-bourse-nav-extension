@@ -17,6 +17,7 @@ import {
 } from '../data/codal-monthly-parser';
 import { validateCodalSearchSymbol } from '../data/codal-symbol-validation';
 import {
+  createLiveNoCandidatesParseResult,
   createUnavailableNetworkParseResult,
   getParsedCodalSummary,
   markParseResultStale,
@@ -63,7 +64,17 @@ import {
 import styles from './styles.css?inline';
 
 const WIDGET_ROOT_ID = 'ibnav-widget';
+const EXTENSION_CONTEXT_INVALIDATED_MESSAGE =
+  'افزونه reload شده است؛ صفحه را refresh کنید و دوباره تلاش کنید.';
 let widgetRenderSequence = 0;
+
+function userFacingErrorMessage(error: unknown, fallback = 'خطای نامشخص'): string {
+  const message = error instanceof Error ? error.message : String(error ?? fallback);
+  if (/Extension context invalidated|context invalidated/i.test(message)) {
+    return EXTENSION_CONTEXT_INVALIDATED_MESSAGE;
+  }
+  return message || fallback;
+}
 
 export interface NavWidgetOptions {
   symbol: string;
@@ -394,6 +405,11 @@ function suggestionSafetyWarnings(value: ExtractedPortfolioValue, result: Monthl
   }
   if (value.kind === 'equitySuggestion') {
     warnings.push('اعمال حقوق صاحبان سهام به‌تنهایی NAV را کامل نمی‌کند؛ سایر ورودی‌های ضروری باید دستی بررسی شوند.');
+    if (value.confidence === 'low') {
+      warnings.push(
+        'پیشنهاد حقوق صاحبان سهام پیدا شد، اما واحد/دوره با اطمینان تشخیص داده نشد؛ قبل از اعمال حتماً با صورت مالی تطبیق دهید.'
+      );
+    }
   }
   if (value.kind === 'totalSharesSuggestion') {
     warnings.push('اعمال تعداد سهام فقط برای NAV هر سهم/P/NAV استفاده می‌شود و NAV کل را کامل نمی‌کند.');
@@ -1226,7 +1242,13 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   const mount = options.mount ?? document.body;
   ensureStyle();
 
-  let activeRecord = await getManualOverride(options.symbol);
+  let initialStorageWarning: string | undefined;
+  let activeRecord: ManualOverrideRecord | undefined;
+  try {
+    activeRecord = await getManualOverride(options.symbol);
+  } catch (error) {
+    initialStorageWarning = userFacingErrorMessage(error);
+  }
   activeRecord = activeRecord ? normalizeManualOverrideRecord(activeRecord) : undefined;
   let latestParseResult: MonthlyActivityParseResult | undefined;
   let latestDiscoveryResult: CodalReportDiscoveryResult | undefined;
@@ -1309,6 +1331,9 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
   updateResults(root, updatedAt);
   updateResetCodalButton(root, activeRecord);
   updateFieldSourceBadges(root, activeRecord);
+  if (initialStorageWarning) {
+    setApplyStatus(root, initialStorageWarning, true);
+  }
   updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
     activeRecord = record;
   }, latestParseResult, latestSupport);
@@ -1382,18 +1407,29 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           all.findIndex((candidate) => (candidate.url ?? candidate.tracingNo ?? candidate.title) === (report.url ?? report.tracingNo ?? report.title)) === index
       );
       for (const report of uniqueReports) {
-        const detailResult = await requestCodalReportDetail(report);
-        if (!isActiveWidgetRender(root, renderId)) return;
-        if (!renderedDetail) {
-          renderCodalDetail(root, detailResult);
-          renderedDetail = true;
-        }
-        if (detailResult.detail) {
-          parseResults.push(
-            report === result.financialStatementReport
-              ? parseFinancialStatementReport(detailResult.detail)
-              : parseMonthlyActivityReport(detailResult.detail)
-          );
+        try {
+          const detailResult = await requestCodalReportDetail(report);
+          if (!isActiveWidgetRender(root, renderId)) return;
+          if (!renderedDetail) {
+            renderCodalDetail(root, detailResult);
+            renderedDetail = true;
+          }
+          if (detailResult.detail) {
+            parseResults.push(
+              report === result.financialStatementReport
+                ? parseFinancialStatementReport(detailResult.detail)
+                : parseMonthlyActivityReport(detailResult.detail)
+            );
+          }
+        } catch (error) {
+          if (!isActiveWidgetRender(root, renderId)) return;
+          if (!renderedDetail) {
+            renderCodalDetail(root, {
+              status: 'network-error',
+              errorMessage: userFacingErrorMessage(error, 'خطای نامشخص در دریافت جزئیات کدال')
+            });
+            renderedDetail = true;
+          }
         }
       }
 
@@ -1430,28 +1466,47 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
           }, latestParseResult, latestSupport);
       } else if (parserDataStatusFor({ discovery: result }) === 'unavailable-network-error' || result.status === 'stale-cache') {
         await renderCachedOrUnavailableParse(result);
+      } else {
+        latestParseResult = createLiveNoCandidatesParseResult({
+          symbol: options.symbol,
+          codalSymbol: codalSymbolValidation.symbol,
+          reportTitle: result.monthlyActivityReport?.title ?? result.financialStatementReport?.title,
+          warning: 'گزارش‌های کدال دریافت شدند، اما جزئیات قابل استخراج برای کاندیدهای NAV پیدا نشد.'
+        });
+        latestSupport = classifyHoldingSupport({
+          instrumentName: options.instrumentName,
+          discovery: result,
+          parseResult: latestParseResult
+        });
+        renderMonthlySuggestions(root, latestParseResult, options, () => activeRecord, (record) => {
+          activeRecord = record;
+        }, latestSupport);
+        updateCompletionWorkflow(root, options, () => activeRecord, (record) => {
+          activeRecord = record;
+        }, latestParseResult, latestSupport);
       }
     } catch (error: unknown) {
       if (!isActiveWidgetRender(root, renderId)) return;
+      const message = userFacingErrorMessage(error, 'خطای نامشخص در دریافت کدال');
       renderCodalDiscovery(root, {
         status: 'network-error',
         symbol: options.symbol,
-        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
+        errorMessage: message,
         sourceVerified: false,
         checkedAt: new Date().toISOString()
       });
       latestDiscoveryResult = {
         status: 'network-error',
         symbol: options.symbol,
-        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت کدال',
+        errorMessage: message,
         sourceVerified: false,
         checkedAt: new Date().toISOString()
       };
       renderCodalDetail(root, {
         status: 'network-error',
-        errorMessage: error instanceof Error ? error.message : 'خطای نامشخص در دریافت جزئیات کدال'
+        errorMessage: message
       });
-      await renderCachedOrUnavailableParse(latestDiscoveryResult, error instanceof Error ? error.message : undefined);
+      await renderCachedOrUnavailableParse(latestDiscoveryResult, message);
     }
   };
 
@@ -1560,7 +1615,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     } catch (error) {
       setApplyStatus(
         root,
-        `ذخیره ورودی‌های دستی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+        `ذخیره ورودی‌های دستی ناموفق بود: ${userFacingErrorMessage(error)}`,
         true
       );
     }
@@ -1594,7 +1649,7 @@ export async function renderNavWidget(options: NavWidgetOptions): Promise<HTMLEl
     } catch (error) {
       setApplyStatus(
         root,
-        `پاک کردن مقادیر پیشنهادی ناموفق بود: ${error instanceof Error ? error.message : 'خطای نامشخص'}`,
+        `پاک کردن مقادیر پیشنهادی ناموفق بود: ${userFacingErrorMessage(error)}`,
         true
       );
     }

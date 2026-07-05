@@ -21,6 +21,9 @@ export type PortfolioValueKind =
   | 'totalSharesSuggestion';
 
 export type ParseConfidence = 'high' | 'medium' | 'low';
+export type PeriodMatchStatus = 'exact-current-period' | 'current-period-inferred' | 'prior-or-restated' | 'unknown';
+export type UnitDetectionStatus = 'detected' | 'unknown';
+export type TableContextStatus = 'balance-sheet-strong' | 'balance-sheet-weak';
 
 export interface ExtractedPortfolioValue {
   kind: PortfolioValueKind;
@@ -40,6 +43,10 @@ export interface ExtractedPortfolioValue {
   sourceTableCaption?: string;
   rowLabel?: string;
   columnLabel?: string;
+  periodMatchStatus?: PeriodMatchStatus;
+  unitDetectionStatus?: UnitDetectionStatus;
+  tableContextStatus?: TableContextStatus;
+  confidenceReason?: string;
   rankingScore?: number;
   reason?: string;
   warning?: string;
@@ -123,7 +130,7 @@ export interface MonthlyActivityParserDiagnostics {
   fetchTimestamp?: string;
   detectedTableCount: number;
   parserStatus: MonthlyActivityParseResult['status'];
-  parserDataStatus?: 'live' | 'stale-cache' | 'unavailable-network-error';
+  parserDataStatus?: 'live' | 'stale-cache' | 'unavailable-network-error' | 'not-attempted';
   staleParsedCacheUsed?: boolean;
   parsedCacheCachedAt?: string;
   candidateAvailability?:
@@ -131,7 +138,8 @@ export interface MonthlyActivityParserDiagnostics {
     | 'live-basic-candidates-only'
     | 'no-nav-candidates-live'
     | 'stale-candidates'
-    | 'unavailable-network-error';
+    | 'unavailable-network-error'
+    | 'not-attempted';
   parserWarnings: string[];
   extractedCandidates: ExtractedPortfolioValue[];
   rejectedCandidates: ParserRejectedCandidate[];
@@ -291,6 +299,8 @@ interface ColumnContext {
   index: number;
   periodLabel?: string;
   measureLabel?: string;
+  headerPath?: string;
+  periodMatchStatus: PeriodMatchStatus;
   isCurrentPeriod: boolean;
   isPriorPeriod: boolean;
 }
@@ -625,6 +635,21 @@ function unitInfoForTable(table: ParsedTable): UnitInfo {
   return unitInfoForText(tableText(table));
 }
 
+function unitInfoForFinancialTable(detail: CodalReportDetail, table: ParsedTable): UnitInfo {
+  return unitInfoForText(
+    [
+      detail.title,
+      detail.plainTextPreview,
+      detail.rawHtml,
+      table.caption,
+      tableText(table),
+      table.rawRows.map((row) => row.join(' ')).join(' ')
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
+}
+
 function findColumnIndexes(rows: string[][], patterns: RegExp[]): number[] {
   const indexes = new Set<number>();
   for (const row of rows.slice(0, 6)) {
@@ -691,28 +716,68 @@ function dateFromText(value: string): string | undefined {
   return normalizeText(value).match(/\d{4}\/\d{1,2}\/\d{1,2}/)?.[0];
 }
 
-function columnContextFor(rows: string[][], columnIndex: number, reportPeriod?: string): ColumnContext {
-  const headerCells = rows.slice(0, 6).map((row) => normalizeText(row[columnIndex] ?? '')).filter(Boolean);
+function isTechnicalOrNumericHeaderCell(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized) return true;
+  if (dateFromText(normalized)) return false;
+  if (parseCandidateNumber(normalized) !== undefined) return true;
+  return /^[\d,.\s/()+-]+$/.test(normalized);
+}
+
+function cleanHeaderCellsForColumn(rows: string[][], columnIndex: number, sourceRowIndex?: number): string[] {
+  const rowLimit = sourceRowIndex === undefined ? 6 : Math.max(1, Math.min(sourceRowIndex, 8));
+  const cells = rows
+    .slice(0, rowLimit)
+    .map((row) => normalizeText(row[columnIndex] ?? ''))
+    .filter((cell) => !isTechnicalOrNumericHeaderCell(cell));
+  return [...new Set(cells)];
+}
+
+function isRestatedOrPriorColumnLabel(value: string): boolean {
+  return /تجدید\s*ارائه|دوره\s*قبل|سال\s*قبل|سال\s*مالی\s*قبل|پایان\s*سال\s*مالی\s*قبل|previous|prior/i.test(
+    normalizeText(value)
+  );
+}
+
+function columnContextFor(
+  rows: string[][],
+  columnIndex: number,
+  reportPeriod?: string,
+  sourceRowIndex?: number
+): ColumnContext {
+  const headerCells = cleanHeaderCellsForColumn(rows, columnIndex, sourceRowIndex);
+  const headerPath = headerCells.join(' / ') || undefined;
   const periodLabel = headerCells.find((cell) => dateFromText(cell));
   const currentPeriodLabel = headerCells.find((cell) => /دوره\s*جاری|پایان\s*دوره|سال\s*مالی\s*منتهی/.test(cell));
-  const priorPeriodLabel = headerCells.find((cell) => /دوره\s*قبل|سال\s*قبل|سال\s*مالی\s*قبل|پایان\s*سال\s*مالی\s*قبل/.test(cell));
+  const priorPeriodLabel = headerCells.find((cell) => isRestatedOrPriorColumnLabel(cell));
   const measureLabel = headerCells.find((cell) =>
     hasAny(cell, [...labelPatterns.listedPortfolioCostValue, ...labelPatterns.listedPortfolioMarketValue])
   );
   const periodDate = periodLabel ? dateFromText(periodLabel) : undefined;
+  const periodMatchStatus: PeriodMatchStatus =
+    reportPeriod && periodDate === reportPeriod && !priorPeriodLabel
+      ? 'exact-current-period'
+      : priorPeriodLabel || (reportPeriod && periodDate && periodDate !== reportPeriod)
+        ? 'prior-or-restated'
+        : currentPeriodLabel && !priorPeriodLabel
+          ? 'current-period-inferred'
+          : 'unknown';
 
   return {
     index: columnIndex,
     periodLabel: periodLabel ?? currentPeriodLabel ?? priorPeriodLabel,
     measureLabel,
-    isCurrentPeriod: Boolean((reportPeriod && periodDate === reportPeriod) || (!periodDate && currentPeriodLabel)),
-    isPriorPeriod: Boolean(priorPeriodLabel || (reportPeriod && periodDate && periodDate !== reportPeriod))
+    headerPath,
+    periodMatchStatus,
+    isCurrentPeriod: periodMatchStatus === 'exact-current-period' || periodMatchStatus === 'current-period-inferred',
+    isPriorPeriod: periodMatchStatus === 'prior-or-restated'
   };
 }
 
 function rankColumnContext(context: ColumnContext): number {
   if (context.isPriorPeriod) return -100;
-  if (context.isCurrentPeriod) return 100;
+  if (context.periodMatchStatus === 'exact-current-period') return 120;
+  if (context.periodMatchStatus === 'current-period-inferred') return 90;
   if (!context.periodLabel) return 20;
   return 0;
 }
@@ -1370,22 +1435,25 @@ function isFinancialPositionTable(table: ParsedTable): boolean {
 function bestNumericCellInRow(
   table: ParsedTable,
   row: string[],
-  reportPeriod?: string
+  reportPeriod?: string,
+  rowIndex?: number
 ): { columnIndex: number; rawText: string; rawValue: number; context: ColumnContext } | undefined {
   const numericCells = row
     .map((cell, columnIndex) => ({
       columnIndex,
       rawText: cell,
       rawValue: parseCandidateNumber(cell),
-      context: columnContextFor(table.rows, columnIndex, reportPeriod)
+      context: columnContextFor(table.rows, columnIndex, reportPeriod, rowIndex)
     }))
     .filter((candidate): candidate is { columnIndex: number; rawText: string; rawValue: number; context: ColumnContext } => {
-      if (candidate.rawValue === undefined || candidate.context.isPriorPeriod) return false;
+      if (candidate.rawValue === undefined) return false;
       return Math.abs(candidate.rawValue) > 0;
-    })
-    .sort((left, right) => rankColumnContext(right.context) - rankColumnContext(left.context));
+    });
 
-  return numericCells[0];
+  const preferredCells = numericCells.filter((candidate) => !candidate.context.isPriorPeriod);
+  const selectableCells = preferredCells.length > 0 ? preferredCells : numericCells;
+
+  return selectableCells.sort((left, right) => rankColumnContext(right.context) - rankColumnContext(left.context))[0];
 }
 
 function extractStandaloneFinancialValue(options: {
@@ -1415,19 +1483,23 @@ function extractStandaloneFinancialValue(options: {
       }
     }
 
-    const numeric = bestNumericCellInRow(options.table, row, options.reportPeriod);
+    const numeric = bestNumericCellInRow(options.table, row, options.reportPeriod, rowIndex);
     if (!numeric) continue;
 
     const multiplier = options.kind === 'totalSharesSuggestion' ? 1 : options.unitInfo.multiplier;
+    const unitDetectionStatus: UnitDetectionStatus = options.unitInfo.clear ? 'detected' : 'unknown';
+    const tableContextStatus: TableContextStatus = financialPositionTable ? 'balance-sheet-strong' : 'balance-sheet-weak';
+    const periodMatchStatus = numeric.context.periodMatchStatus;
     const confidence: ParseConfidence =
       options.kind === 'equitySuggestion'
-        ? !options.unitInfo.clear
+        ? unitDetectionStatus === 'unknown' ||
+          periodMatchStatus === 'unknown' ||
+          periodMatchStatus === 'prior-or-restated' ||
+          tableContextStatus === 'balance-sheet-weak'
           ? 'low'
-          : consolidated || equityMatch === 'parent-attributable' || equityMatch === 'generic-total'
+          : consolidated || equityMatch === 'parent-attributable' || equityMatch === 'generic-total' || periodMatchStatus === 'current-period-inferred'
             ? 'medium'
-            : !numeric.context.isCurrentPeriod && Boolean(options.reportPeriod)
-              ? 'low'
-              : 'high'
+            : 'high'
         : 'medium';
     const consolidatedWarning =
       options.kind === 'equitySuggestion' && consolidated
@@ -1438,11 +1510,27 @@ function extractStandaloneFinancialValue(options: {
         ? 'این مقدار مربوط به حقوق مالکانه قابل انتساب به مالکان شرکت اصلی است و باید با مبنای NAV تطبیق داده شود.'
         : undefined;
     const periodWarning =
-      options.kind === 'equitySuggestion' && !numeric.context.isCurrentPeriod && Boolean(options.reportPeriod)
-        ? 'ستون دوره جاری با اطمینان تشخیص داده نشد؛ مقدار نیازمند بررسی دستی است.'
+      options.kind === 'equitySuggestion' && periodMatchStatus === 'prior-or-restated'
+        ? 'ستون انتخاب‌شده ممکن است مربوط به دوره قبل/تجدید ارائه‌شده باشد؛ مقدار را دستی بررسی کنید.'
+        : options.kind === 'equitySuggestion' && periodMatchStatus === 'unknown' && Boolean(options.reportPeriod)
+          ? 'ستون دوره جاری با اطمینان تشخیص داده نشد؛ مقدار نیازمند بررسی دستی است.'
+          : undefined;
+    const contextWarning =
+      options.kind === 'equitySuggestion' && tableContextStatus === 'balance-sheet-weak'
+        ? 'جدول صورت وضعیت مالی با اطمینان قوی تشخیص داده نشد؛ مقدار را دستی بررسی کنید.'
         : undefined;
-    const unitWarning = options.kind === 'equitySuggestion' && !options.unitInfo.clear ? options.unitInfo.warning : undefined;
-    const warning = [consolidatedWarning, parentWarning, periodWarning, options.warning, unitWarning].filter(Boolean).join(' ') || undefined;
+    const unitWarning =
+      options.kind === 'equitySuggestion' && !options.unitInfo.clear
+        ? 'واحد صورت مالی با اطمینان تشخیص داده نشد؛ مقدار خام بدون مقیاس‌گذاری پیشنهاد شده است.'
+        : undefined;
+    const confidenceReason =
+      options.kind === 'equitySuggestion'
+        ? `row=${equityMatch}; period=${periodMatchStatus}; unit=${unitDetectionStatus}; table=${tableContextStatus}`
+        : undefined;
+    const warning =
+      [consolidatedWarning, parentWarning, periodWarning, contextWarning, options.warning, unitWarning]
+        .filter(Boolean)
+        .join(' ') || undefined;
     extracted.push({
       kind: options.kind,
       label: valueLabel(options.kind),
@@ -1460,13 +1548,11 @@ function extractStandaloneFinancialValue(options: {
       sourceColumnIndex: numeric.columnIndex,
       sourceTableCaption: options.table.caption,
       rowLabel: rowLabel(row),
-      columnLabel:
-        numeric.context.measureLabel ??
-        options.table.rows
-          .slice(0, 6)
-          .map((headerRow) => headerRow[numeric.columnIndex])
-          .filter(Boolean)
-          .join(' / '),
+      columnLabel: numeric.context.headerPath ?? numeric.context.measureLabel,
+      periodMatchStatus: options.kind === 'equitySuggestion' ? periodMatchStatus : undefined,
+      unitDetectionStatus: options.kind === 'equitySuggestion' ? unitDetectionStatus : undefined,
+      tableContextStatus: options.kind === 'equitySuggestion' ? tableContextStatus : undefined,
+      confidenceReason,
       reason: `جدول ${options.table.index}، ردیف ${rowIndex + 1}، ستون ${numeric.columnIndex + 1} (${confidence})`,
       warning
     });
@@ -1520,7 +1606,7 @@ export function parseFinancialStatementReport(detail: CodalReportDetail): Monthl
   }
 
   const extractedValues = tables.flatMap((table) => {
-    const unitInfo = unitInfoForTable(table);
+    const unitInfo = unitInfoForFinancialTable(detail, table);
     return [
       ...extractStandaloneFinancialValue({
         detail,
@@ -1587,7 +1673,9 @@ export function parseFinancialStatementReport(detail: CodalReportDetail): Monthl
 
 export function mergeMonthlyActivityParseResults(results: MonthlyActivityParseResult[]): MonthlyActivityParseResult {
   const available = results.filter(Boolean);
-  const base = available[0];
+  const base =
+    available.find((result) => result.diagnostics.sourceStrategy || result.extractedValues.some((value) => value.kind === 'listedPortfolioCostValue')) ??
+    available[0];
   if (!base) {
     const parsedAt = new Date().toISOString();
     return {
@@ -1613,10 +1701,47 @@ export function mergeMonthlyActivityParseResults(results: MonthlyActivityParseRe
   const extractedValues = available.flatMap((result) => result.extractedValues);
   const secondarySuggestions = available.flatMap((result) => result.secondarySuggestions);
   const warnings = [...new Set(available.flatMap((result) => result.warnings))];
+  const mergedKinds = [
+    ...extractedValues.map((value) => value.kind),
+    ...secondarySuggestions.map((value) => value.kind)
+  ];
+  const hasNavCandidates = mergedKinds.some((kind) =>
+    [
+      'equitySuggestion',
+      'listedPortfolioCostValue',
+      'listedPortfolioMarketValue',
+      'unlistedPortfolioCostValue',
+      'unlistedPortfolioEstimatedValue',
+      'unlistedPortfolioSurplusSuggestion'
+    ].includes(kind)
+  );
+  const hasBasicCandidates = mergedKinds.some((kind) => kind === 'totalSharesSuggestion');
+  const parserStatus: MonthlyActivityParseResult['status'] =
+    extractedValues.length > 0 ? (warnings.length ? 'ambiguous' : 'parsed') : available.some((result) => result.status === 'unsupported-report') ? 'unsupported-report' : 'ambiguous';
+  const parserDataStatus = available.some((result) => result.diagnostics.parserDataStatus === 'stale-cache')
+    ? 'stale-cache'
+    : available.some((result) => result.diagnostics.parserDataStatus === 'unavailable-network-error')
+      ? 'unavailable-network-error'
+      : 'live';
   const diagnostics: MonthlyActivityParserDiagnostics = {
     ...base.diagnostics,
     detectedTableCount: available.reduce((sum, result) => sum + result.diagnostics.detectedTableCount, 0),
-    parserStatus: extractedValues.length > 0 ? (warnings.length ? 'ambiguous' : 'parsed') : 'ambiguous',
+    parserStatus,
+    parserDataStatus,
+    staleParsedCacheUsed: available.some((result) => result.diagnostics.staleParsedCacheUsed),
+    parsedCacheCachedAt: available.find((result) => result.diagnostics.parsedCacheCachedAt)?.diagnostics.parsedCacheCachedAt,
+    candidateAvailability:
+      parserDataStatus === 'unavailable-network-error'
+        ? 'unavailable-network-error'
+        : parserDataStatus === 'stale-cache'
+          ? hasNavCandidates || hasBasicCandidates
+            ? 'stale-candidates'
+            : 'unavailable-network-error'
+          : hasNavCandidates
+            ? 'live-nav-candidates'
+            : hasBasicCandidates
+              ? 'live-basic-candidates-only'
+              : 'no-nav-candidates-live',
     parserWarnings: warnings,
     extractedCandidates: available.flatMap((result) => result.diagnostics.extractedCandidates),
     rejectedCandidates: available.flatMap((result) => result.diagnostics.rejectedCandidates),
@@ -1625,7 +1750,7 @@ export function mergeMonthlyActivityParseResults(results: MonthlyActivityParseRe
 
   return {
     ...base,
-    status: diagnostics.parserStatus,
+    status: parserStatus,
     reportTitle: available.map((result) => result.reportTitle).filter(Boolean).join(' + ') || base.reportTitle,
     tableCandidates: available.flatMap((result) => result.tableCandidates),
     extractedValues,

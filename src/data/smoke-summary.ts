@@ -44,11 +44,33 @@ function compactCandidate(value: ExtractedPortfolioValue): Record<string, unknow
   return {
     kind: value.kind,
     value: value.value,
+    rawValue: value.rawValue,
+    rawText: value.rawText,
     confidence: value.confidence,
     unit: value.unit,
+    unitMultiplier: value.unitMultiplier,
     tableIndex: value.sourceTableIndex,
     rowLabel: value.rowLabel,
-    columnLabel: value.columnLabel
+    columnLabel: value.columnLabel,
+    periodLabel: value.periodLabel,
+    periodMatchStatus: value.periodMatchStatus,
+    unitDetectionStatus: value.unitDetectionStatus,
+    tableContextStatus: value.tableContextStatus,
+    warnings: value.warning ? [value.warning] : [],
+    confidenceReason: value.confidenceReason ?? value.reason
+  };
+}
+
+function fetchCacheStatusFor(discovery: CodalReportDiscoveryResult | undefined): Record<string, unknown> {
+  if (!discovery) {
+    return { status: 'not-attempted' };
+  }
+  return {
+    status: discovery.status,
+    usedCache: discovery.usedCache ?? false,
+    stale: discovery.stale ?? false,
+    cachedAt: discovery.cachedAt,
+    liveFetch: discovery.diagnostics?.liveFetch
   };
 }
 
@@ -163,12 +185,7 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
     codalLiveFetchStatus: input.discovery?.diagnostics?.liveFetch?.status,
     codalLiveFetchError: input.discovery?.diagnostics?.liveFetch?.errorMessage ?? input.discovery?.errorMessage,
     candidateAvailability,
-    fetchCacheStatus: {
-      usedCache: input.discovery?.usedCache,
-      stale: input.discovery?.stale,
-      cachedAt: input.discovery?.cachedAt,
-      liveFetch: input.discovery?.diagnostics?.liveFetch
-    },
+    fetchCacheStatus: fetchCacheStatusFor(input.discovery),
     monthlyReport: input.discovery?.monthlyActivityReport
       ? {
           title: input.discovery.monthlyActivityReport.title,

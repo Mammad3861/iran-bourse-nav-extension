@@ -7,13 +7,14 @@ import type {
 } from './codal-monthly-parser';
 import { manualReviewMarketValueSummary } from './market-value-review';
 
-export type ParserDataStatus = 'live' | 'stale-cache' | 'unavailable-network-error';
+export type ParserDataStatus = 'live' | 'stale-cache' | 'unavailable-network-error' | 'not-attempted';
 export type CandidateAvailability =
   | 'live-nav-candidates'
   | 'live-basic-candidates-only'
   | 'no-nav-candidates-live'
   | 'stale-candidates'
-  | 'unavailable-network-error';
+  | 'unavailable-network-error'
+  | 'not-attempted';
 
 export interface ParsedCodalCacheRecord {
   symbol: string;
@@ -116,6 +117,7 @@ function candidateAvailabilityFor(
       ].includes(kind)
     );
   const hasBasicCandidates = allKinds.some((kind) => kind === 'totalSharesSuggestion');
+  if (parserDataStatus === 'not-attempted') return 'not-attempted';
   if (parserDataStatus === 'unavailable-network-error') return 'unavailable-network-error';
   if (parserDataStatus === 'stale-cache') return hasNavCandidates || hasBasicCandidates ? 'stale-candidates' : 'unavailable-network-error';
   if (hasNavCandidates) return 'live-nav-candidates';
@@ -180,6 +182,40 @@ export function createUnavailableNetworkParseResult(input: {
       parserDataStatus: 'unavailable-network-error',
       staleParsedCacheUsed: false,
       candidateAvailability: 'unavailable-network-error',
+      parserWarnings: [warning],
+      extractedCandidates: [],
+      rejectedCandidates: [],
+      tables: []
+    },
+    warnings: [warning],
+    parsedAt: new Date().toISOString()
+  };
+}
+
+export function createLiveNoCandidatesParseResult(input: {
+  symbol: string;
+  codalSymbol?: string;
+  reportTitle?: string;
+  warning?: string;
+}): MonthlyActivityParseResult {
+  const warning = input.warning ?? 'جزئیات گزارش بررسی شد، اما کاندید قابل اتکایی برای NAV پیدا نشد.';
+  return {
+    status: 'empty',
+    reportTitle: input.reportTitle,
+    tableCandidates: [],
+    extractedValues: [],
+    primarySuggestions: [],
+    secondarySuggestions: [],
+    tablePreviews: [],
+    diagnostics: {
+      symbol: input.symbol,
+      codalSymbol: input.codalSymbol,
+      reportTitle: input.reportTitle,
+      detectedTableCount: 0,
+      parserStatus: 'empty',
+      parserDataStatus: 'live',
+      staleParsedCacheUsed: false,
+      candidateAvailability: 'no-nav-candidates-live',
       parserWarnings: [warning],
       extractedCandidates: [],
       rejectedCandidates: [],
@@ -293,7 +329,7 @@ export async function getParsedCodalSummary(symbol: string | undefined): Promise
 export function parserDataStatusFor(input: {
   discovery?: CodalReportDiscoveryResult;
   parseResult?: MonthlyActivityParseResult;
-}): ParserDataStatus | undefined {
+}): ParserDataStatus {
   if (input.parseResult?.diagnostics.parserDataStatus) {
     return input.parseResult.diagnostics.parserDataStatus;
   }
@@ -304,7 +340,7 @@ export function parserDataStatusFor(input: {
   if (['network-error', 'cors-blocked', 'unavailable', 'parse-error', 'failed'].includes(liveStatus ?? '')) {
     return 'unavailable-network-error';
   }
-  return undefined;
+  return 'not-attempted';
 }
 
 export function candidateAvailabilityForSmoke(input: {
@@ -312,8 +348,10 @@ export function candidateAvailabilityForSmoke(input: {
   parseResult?: MonthlyActivityParseResult;
 }): CandidateAvailability | undefined {
   const status = parserDataStatusFor(input);
-  if (!status) return undefined;
-  if (!input.parseResult) return status === 'unavailable-network-error' ? 'unavailable-network-error' : undefined;
+  if (!input.parseResult) {
+    if (status === 'unavailable-network-error') return 'unavailable-network-error';
+    return status === 'not-attempted' ? 'not-attempted' : 'no-nav-candidates-live';
+  }
   return candidateAvailabilityFor(input.parseResult, status);
 }
 
