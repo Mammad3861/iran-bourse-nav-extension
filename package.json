@@ -1,6 +1,6 @@
 {
   "name": "iran-bourse-nav-extension",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.5",
   "description": "Local-first Chrome extension for estimating NAV and P/NAV of Iranian listed investment and holding companies.",
   "type": "module",
   "private": false,

@@ -1,4 +1,5 @@
 import { analyzeNavCompleteness, calculateNav } from '../core/nav-calculator';
+import { APP_VERSION_NAME } from '../core/app-version';
 import { formatNumberFa, formatPercentRatioFa } from '../core/number-utils';
 import { formatPersianTimestamp } from '../core/persian-date-utils';
 import { getActiveSymbol, getManualOverride } from '../data/cache-store';
@@ -520,6 +521,7 @@ function renderMonthlySuggestions(result: MonthlyActivityParseResult): void {
 
 async function renderPopup(): Promise<void> {
   const symbol = await getActiveSymbol();
+  setText('[data-popup-version]', APP_VERSION_NAME);
   setText('[data-popup-symbol]', symbol ?? 'نماد نامشخص');
 
   if (!symbol) {

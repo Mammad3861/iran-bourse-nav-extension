@@ -1,4 +1,5 @@
 import type { NavInputs } from '../core/nav-calculator';
+import { APP_VERSION_NAME, MANIFEST_VERSION } from '../core/app-version';
 import type { CodalReportDiscoveryResult, CodalReportSelectionCandidate, CodalReportSelectionDiagnostics } from './codal-client';
 import {
   isUnsafeEquitySuggestion,
@@ -350,6 +351,8 @@ export function createSmokeSummary(input: SmokeSummaryInput): Record<string, unk
   ].filter((warning, index, all) => all.indexOf(warning) === index);
 
   return {
+    version: MANIFEST_VERSION,
+    versionName: APP_VERSION_NAME,
     symbol: input.symbol,
     instrumentName: input.instrumentName,
     insCode: input.insCode,

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.5
+
+### Added
+
+- Version display in the popup and Smoke Summary JSON.
+- Manual NAV/no-Codal fallback hardening for internal alpha testing.
+
 ## 0.1.0-alpha.3
 
 ### Added

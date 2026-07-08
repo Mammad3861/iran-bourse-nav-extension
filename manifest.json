@@ -2,7 +2,8 @@
     "manifest_version":  3,
     "name":  "Iran Bourse NAV Estimator",
     "short_name":  "Bourse NAV",
-    "version":  "0.1.0",
+    "version":  "0.1.5",
+    "version_name":  "0.1.0-alpha.5",
     "description":  "Local-first semi-manual NAV and P/NAV estimator for Iranian investment and holding companies on TSETMC.",
     "action":  {
                    "default_title":  "محاسبه NAV",

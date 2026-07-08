@@ -193,6 +193,13 @@ function parseResult(): MonthlyActivityParseResult {
 }
 
 describe('smoke summary', () => {
+  it('includes extension version metadata', () => {
+    expect(createSmokeSummary({ symbol: 'وصندوق', currentPriceSource: 'unknown' })).toMatchObject({
+      version: '0.1.5',
+      versionName: '0.1.0-alpha.5'
+    });
+  });
+
   it('copies compact regression fields without raw table diagnostics', () => {
     const currentRecord = record();
     const parsed = parseResult();
