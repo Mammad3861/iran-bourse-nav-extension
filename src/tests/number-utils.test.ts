@@ -30,6 +30,17 @@ describe('parseLocalizedNumber', () => {
 
   it('returns undefined for invalid values', () => {
     expect(parseLocalizedNumber('---')).toBeUndefined();
+    expect(parseLocalizedNumber('')).toBeUndefined();
+    expect(parseLocalizedNumber('متن بدون عدد')).toBeUndefined();
     expect(parseLocalizedNumber(null)).toBeUndefined();
+  });
+
+  it('parses comma and Persian thousands separators', () => {
+    expect(parseLocalizedNumber('1,234,567')).toBe(1_234_567);
+    expect(parseLocalizedNumber('۱٬۲۳۴٬۵۶۷')).toBe(1_234_567);
+  });
+
+  it('keeps very large finite numbers within the app number model', () => {
+    expect(parseLocalizedNumber('۹٬۰۰۷٬۱۹۹٬۲۵۴٬۷۴۰٬۹۹۱')).toBe(9_007_199_254_740_991);
   });
 });

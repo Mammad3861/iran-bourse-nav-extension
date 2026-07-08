@@ -89,8 +89,8 @@ export function analyzeNavCompleteness(inputs: NavInputs): NavCompletenessResult
     ((inputs.listedPortfolioMarketValue ?? 0) - (inputs.listedPortfolioCostValue ?? 0)) +
     (inputs.unlistedPortfolioSurplus ?? 0);
   const navTotalAvailable = missingFields.length === 0;
-  if (navTotalAvailable && navTotal < 0 && cost !== undefined && cost > 0 && market === undefined) {
-    warnings.push('NAV منفی به دلیل ناقص بودن ورودی‌هاست، نه لزوماً نتیجه واقعی.');
+  if (navTotalAvailable && navTotal < 0) {
+    warnings.push('NAV منفی شده است؛ ورودی‌ها، واحدها و دوره گزارش‌ها را بررسی کنید.');
   }
 
   const status: NavCalculationStatus =

@@ -88,7 +88,7 @@ function discoveryStatusText(result: CodalReportDiscoveryResult): string {
   }
 
   return [
-    'کدال در حال حاضر قابل دریافت نیست؛ اتصال، VPN یا دسترسی افزونه را بررسی کنید.',
+    'کدال در حال حاضر قابل دریافت نیست؛ محاسبه دستی همچنان قابل استفاده است.',
     result.attemptCount ? `تعداد تلاش: ${result.attemptCount}.` : undefined,
     result.errorMessage,
     'داده ذخیره‌شده‌ای برای این نماد وجود ندارد.'

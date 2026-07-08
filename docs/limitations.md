@@ -6,6 +6,8 @@ This extension is an internal alpha testing tool. It provides a local estimate, 
 - NAV output is only a local estimate based on user-reviewed inputs.
 - Manual inputs are the source of truth for calculations.
 - Codal, TSETMC, and Excel parsing is best-effort and can be wrong, stale, unavailable, or shaped differently by network/VPN state.
+- Codal may be temporarily unreachable because of ISP routing, VPN state, filtering, host downtime, or endpoint changes. This is not a blocker for manual NAV calculation.
+- When Codal is unavailable, the extension should remain a local manual estimator: users can still enter, save, reload, and reset manual NAV inputs without waiting for Codal.
 - Codal/TSETMC/Excel values are suggestions only and require manual review before the user applies them.
 - Excel market-value candidates are especially ambiguous; users must verify row labels, column labels, units, periods, and issuer/report context manually.
 - Financial statements may be consolidated, standalone, unaudited, restated, subsidiary-level, or otherwise unsuitable for issuer-level NAV without review.

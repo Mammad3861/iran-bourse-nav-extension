@@ -772,6 +772,77 @@ describe('smoke summary', () => {
     expect((summary.userFacingWarnings as string[]).join(' ')).toContain('کاندیدهای کدال بررسی نشدند');
   });
 
+  it('keeps manual NAV completion visible when Codal is unavailable', () => {
+    const manualRecord: ManualOverrideRecord = {
+      symbol: 'manual-only',
+      inputs: {
+        equity: 1_000_000_000,
+        listedPortfolioMarketValue: 700_000_000,
+        listedPortfolioCostValue: 500_000_000,
+        unlistedPortfolioSurplus: 0,
+        totalShares: 1_000_000,
+        currentPrice: 1_500
+      },
+      currentPriceSource: 'manual',
+      updatedAt: '2026-07-06T00:00:00.000Z',
+      fieldSources: {
+        equity: { value: 1_000_000_000, source: 'manual', appliedAt: '2026-07-06T00:00:00.000Z' },
+        listedPortfolioMarketValue: { value: 700_000_000, source: 'manual', appliedAt: '2026-07-06T00:00:00.000Z' },
+        listedPortfolioCostValue: { value: 500_000_000, source: 'manual', appliedAt: '2026-07-06T00:00:00.000Z' },
+        unlistedPortfolioSurplus: { value: 0, source: 'manual', appliedAt: '2026-07-06T00:00:00.000Z' },
+        totalShares: { value: 1_000_000, source: 'manual', appliedAt: '2026-07-06T00:00:00.000Z' },
+        currentPrice: { value: 1_500, source: 'manual', appliedAt: '2026-07-06T00:00:00.000Z' }
+      }
+    };
+
+    const summary = createSmokeSummary({
+      symbol: 'manual-only',
+      currentPriceSource: 'manual',
+      record: manualRecord,
+      navCompletion: buildNavCompletionSummary(manualRecord),
+      discovery: {
+        status: 'network-error',
+        symbol: 'manual-only',
+        errorStatus: 'network-error',
+        errorMessage: 'Failed to fetch',
+        sourceVerified: false,
+        checkedAt: '2026-07-06T00:00:00.000Z',
+        diagnostics: {
+          requestedSymbol: 'manual-only',
+          liveFetch: {
+            status: 'network-error',
+            errorMessage: 'Failed to fetch',
+            attemptCount: 3,
+            domain: 'search.codal.ir',
+            usedCache: false
+          }
+        }
+      }
+    });
+
+    expect(summary).toMatchObject({
+      smokeReadiness: 'failed',
+      parserDataStatus: 'unavailable-network-error',
+      candidateAvailability: 'unavailable-network-error',
+      navCompletionStatus: 'complete-reviewed',
+      missingFields: [],
+      navShareMissingFields: [],
+      equity: 1_000_000_000,
+      equitySource: 'manual',
+      listedPortfolioMarketValue: 700_000_000,
+      listedPortfolioMarketValueSource: 'manual',
+      listedPortfolioCostValue: 500_000_000,
+      listedPortfolioCostValueSource: 'manual',
+      unlistedPortfolioSurplus: 0,
+      unlistedPortfolioSurplusSource: 'manual',
+      totalShares: 1_000_000,
+      totalSharesSource: 'manual',
+      currentPrice: 1_500,
+      currentPriceSource: 'manual'
+    });
+    expect((summary.userFacingWarnings as string[]).join(' ')).toContain('محاسبه دستی همچنان قابل استفاده است');
+  });
+
   it('reports total-share-only parser output as basic candidates, not NAV candidates', () => {
     const parsed = parseResult();
     parsed.extractedValues = [

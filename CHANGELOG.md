@@ -10,6 +10,7 @@
 - Smoke Summary readiness fields for pending, ready, failed, stale-cache, and no-report parser states.
 - Compact widget progress state for Codal detail fetch and parser completion.
 - Compact `financialEquityExtraction` diagnostics in Smoke Summary.
+- Manual-only NAV smoke workflow and no-Codal fallback guidance.
 
 ### Changed
 
@@ -17,6 +18,7 @@
 - Downgrades consolidated, unknown-unit, or period-ambiguous equity candidates for manual review.
 - Marks early Smoke copies as pending instead of silently showing incomplete not-attempted parser output.
 - Exposes financial balance-sheet table, rejected row, rejected column, unit, and selected-candidate diagnostics for equity extraction.
+- Keeps manual NAV calculation and Smoke Summary source fields useful when live Codal is unavailable.
 
 ## 0.1.0-alpha.1
 

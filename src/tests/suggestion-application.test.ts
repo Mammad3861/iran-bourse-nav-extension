@@ -251,6 +251,43 @@ describe('suggestion application', () => {
     expect(saved?.fieldSources?.listedPortfolioCostValue?.source).toBe('codal-suggestion');
   });
 
+  it('persists complete manual-only NAV inputs as manual source of truth', async () => {
+    const savedRecord: ManualOverrideRecord = {
+      symbol: 'manual-baseline-symbol',
+      inputs: {
+        equity: 1_000_000_000,
+        listedPortfolioMarketValue: 700_000_000,
+        listedPortfolioCostValue: 500_000_000,
+        unlistedPortfolioSurplus: 0,
+        totalShares: 1_000_000,
+        currentPrice: 1_500
+      },
+      currentPriceSource: 'manual',
+      updatedAt: '2026-07-06T00:00:00.000Z',
+      fieldSources: {
+        equity: manualFieldMetadata(1_000_000_000, '2026-07-06T00:00:00.000Z'),
+        listedPortfolioMarketValue: manualFieldMetadata(700_000_000, '2026-07-06T00:00:00.000Z'),
+        listedPortfolioCostValue: manualFieldMetadata(500_000_000, '2026-07-06T00:00:00.000Z'),
+        unlistedPortfolioSurplus: manualFieldMetadata(0, '2026-07-06T00:00:00.000Z'),
+        totalShares: manualFieldMetadata(1_000_000, '2026-07-06T00:00:00.000Z'),
+        currentPrice: manualFieldMetadata(1_500, '2026-07-06T00:00:00.000Z')
+      }
+    };
+
+    await saveManualOverride(savedRecord);
+    const restored = await getManualOverride('manual-baseline-symbol');
+
+    expect(restored?.inputs).toEqual(savedRecord.inputs);
+    expect(restored?.fieldSources?.equity?.source).toBe('manual');
+    expect(restored?.fieldSources?.listedPortfolioMarketValue?.source).toBe('manual');
+    expect(restored?.fieldSources?.unlistedPortfolioSurplus?.source).toBe('manual');
+    expect(calculateNav(restored?.inputs ?? emptyNavInputs())).toEqual({
+      navTotal: 1_200_000_000,
+      navPerShare: 1_200,
+      pToNav: 1.25
+    });
+  });
+
   it('reset Codal-applied values only clears Codal suggestion fields', () => {
     const current = applySuggestionToRecord(record(), suggestion('listedPortfolioCostValue', 900), {
       symbol: 'وغدیر',
@@ -266,6 +303,34 @@ describe('suggestion application', () => {
     expect(reset.inputs.equity).toBe(2000);
     expect(reset.fieldSources?.equity?.source).toBe('manual');
     expect(reset.updatedAt).toBe('2026-06-28T12:00:00.000Z');
+  });
+
+  it('reset suggested values preserves manual fields and user-confirmed zero', () => {
+    const withSuggestion = applySuggestionToRecord(record(), suggestion('listedPortfolioCostValue', 900), {
+      symbol: 'وغدیر',
+      currentPriceSource: 'manual',
+      appliedAt: '2026-07-06T10:00:00.000Z'
+    });
+    const withManualMarket = markFieldAsManual(
+      withSuggestion,
+      'listedPortfolioMarketValue',
+      1_100,
+      '2026-07-06T11:00:00.000Z'
+    );
+    const withManualZero = markFieldAsManual(
+      withManualMarket,
+      'unlistedPortfolioSurplus',
+      0,
+      '2026-07-06T11:05:00.000Z'
+    );
+
+    const reset = resetCodalSuggestionFields(withManualZero, '2026-07-06T12:00:00.000Z');
+
+    expect(reset.inputs.listedPortfolioCostValue).toBeUndefined();
+    expect(reset.inputs.listedPortfolioMarketValue).toBe(1_100);
+    expect(reset.fieldSources?.listedPortfolioMarketValue?.source).toBe('manual');
+    expect(reset.inputs.unlistedPortfolioSurplus).toBe(0);
+    expect(reset.fieldSources?.unlistedPortfolioSurplus?.source).toBe('manual');
   });
 
   it('applies equity suggestions without completing NAV by itself', () => {

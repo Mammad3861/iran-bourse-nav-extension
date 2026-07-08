@@ -42,7 +42,7 @@ export interface ParsedCodalCacheRecord {
 const STALE_PARSED_WARNING =
   'داده کدال زنده دریافت نشد؛ آخرین نتیجه ذخیره‌شده نمایش داده شده است.';
 const UNAVAILABLE_NETWORK_WARNING =
-  'به دلیل خطای اتصال، کاندیدهای کدال بررسی نشدند.';
+  'کدال در حال حاضر قابل دریافت نیست؛ محاسبه دستی همچنان قابل استفاده است. به دلیل خطای اتصال، کاندیدهای کدال بررسی نشدند.';
 
 function parsedCacheKey(symbol: string): string {
   return `codal-parsed-summary:${symbol.trim()}`;

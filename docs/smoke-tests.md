@@ -18,6 +18,26 @@ npm run validate:content-scripts
 
 Use these symbols before handing an alpha build to manual testers. Live Codal/TSETMC availability can vary by network/VPN state, so the expected behavior includes cache/error states as valid outcomes when clearly labeled.
 
+## Manual-Only NAV Smoke Test
+
+Codal availability is not required for this smoke test. If `codal.ir` or `search.codal.ir` is unreachable, the widget should show a compact warning such as `کدال در حال حاضر قابل دریافت نیست؛ محاسبه دستی همچنان قابل استفاده است.` and keep all manual fields usable.
+
+1. Open any TSETMC symbol page where the widget loads.
+2. Enter these manual values:
+   - `equity = 1000000000`
+   - `listedPortfolioMarketValue = 700000000`
+   - `listedPortfolioCostValue = 500000000`
+   - `unlistedPortfolioSurplus = 0`
+   - `totalShares = 1000000`
+   - `currentPrice = 1500`
+3. Expected calculation:
+   - `NAV total = 1200000000`
+   - `NAV/share = 1200`
+   - `P/NAV = 1.25` or `125%`, depending on display format.
+4. Save the inputs, reload the page, and verify the same values are restored with manual source labels.
+5. Use reset applied suggestions. It must not clear manually entered fields or an explicitly typed/user-confirmed zero.
+6. Copy Smoke Summary. It should include manual values and sources for equity, listed market value, listed cost value, unlisted surplus, total shares, and current price. If Codal failed, `smokeReadiness` may be `failed`, but `navCompletionStatus` should still reflect the manual inputs.
+
 | Symbol | holdingSupport | currentPrice | Codal discovery/cache | monthlyReport | financialReport | Candidate availability | NAV completion | User action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | وصندوق | `likely-holding` | TSETMC latest trade when visible; otherwise manual fallback | `found` when live works, or clearly labeled `stale-cache`/`unavailable-network-error` | High confidence monthly activity report | Issuer-level or consolidated financial report may appear when strongly matched | Cost and TSETMC total-share suggestions may appear; market candidates require manual review | Incomplete until equity, listed market value, cost, unlisted surplus, and shares are complete/reviewed | Apply suggestions only by explicit click; review Excel market candidates manually |
